@@ -36,7 +36,7 @@ YS_HTTPS=1 python main.py        # 화면에 나오는 https://<내부IP>:8443 �
 
 방문객은 휴대폰 LTE로 QR을 열기 때문에 평소에는 **인터넷에서 열리는 https 주소**가 필요합니다. 서버 상황이 나쁠 때를 대비해 같은 이미지로 현장 로컬 운영(플랜 B)도 준비해 둡니다. 실행 방법은 `docker-compose.yml` 맨 위 주석에 있습니다.
 
-**플랜 A: 집 컴퓨터 서버 + Cloudflare Tunnel**
+**플랜 A-1: 집 컴퓨터 서버 + Cloudflare Tunnel**
 
 ```bash
 cp .env.example .env                              # 도메인, TUNNEL_TOKEN, YS_BOOTH_KEY
@@ -46,6 +46,22 @@ docker compose --profile online up -d --build
 - **부스 기기:** `https://<도메인>/?key=<YS_BOOTH_KEY>`를 한 번 열면 쿠키로 기억해서, 그 기기는 계속 촬영 화면을 쓸 수 있습니다.
 - **방문객:** QR로 `/p/<ID>` 받기 화면만 열 수 있습니다.
 - **https:** Cloudflare Tunnel이 인증서를 맡고, 공유기 포트포워딩이 필요 없습니다. Cloudflare에 연결한 도메인이 있어야 주소가 바뀌지 않습니다. 임시 주소는 다시 켤 때마다 바뀌어서 이미 나눠 준 QR이 열리지 않게 됩니다.
+
+**플랜 A-2: 집 컴퓨터 서버 + 공유기 포트포워딩 + Caddy**
+
+```bash
+cp .env.example .env                              # YS_PUBLIC_URL, YS_DOMAIN, YS_BOOTH_KEY
+docker compose --profile web up -d --build
+```
+
+- **공유기:** TCP 80·443과 UDP 443을 이 컴퓨터의 내부 IP로 포워딩하고, 내부 IP는 DHCP 예약으로 고정하세요. 도메인 A 레코드는 집 공인 IP로 둡니다(유동 IP면 DDNS 필요).
+- **https:** Caddy가 Let's Encrypt 인증서를 자동으로 받고 갱신합니다. 인증서는 `caddy_data` 볼륨에 남습니다.
+- **로봇 막기:** Caddy가 robots.txt와 `X-Robots-Tag`로 검색 수집을 막고, 크롤러·스크립트 도구·빈 User-Agent는 403, 취약점 스캐너가 찾는 주소(`*.php`, `/.env` 등)는 404로 돌려보냅니다(`Caddyfile`).
+- **접근 제한:** Caddy는 `YS_DOMAIN`으로 온 요청만 부스에 넘깁니다. Host가 공개 주소와 같으므로 `guard_public`이 플랜 A-1과 똑같이 방문객 화면만 엽니다.
+
+**GPU 서버 (NVIDIA)**
+
+`docker-compose.gpu.yml`을 덧붙이면 `onnxruntime-gpu`와 `resnet50` 매팅 모델로 빌드하고 GPU를 붙입니다. `.env`에 `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`을 넣어 두면 `-f` 없이 그대로 쓸 수 있습니다. GPU가 없는 현장 노트북은 이 파일 없이 CPU 이미지를 씁니다.
 
 **플랜 B: 현장 노트북 + 공유기 (인터넷 없이)**
 
@@ -80,9 +96,12 @@ docker compose --env-file .env.local up -d        # 부스 화면: http://localh
 | `YS_HTTPS` | 꺼짐 | `1`이면 자체 서명 인증서로 https 실행 (휴대폰 카메라용) |
 | `YS_PUBLIC_URL` | 자동 | QR코드에 넣을 외부 주소 (예: `https://booth.example.com`) |
 | `YS_BOOTH_KEY` | 없음 | 공개 주소에서 부스 화면을 열 때 쓰는 열쇠 (`/?key=값`으로 한 번 열기) |
+| `YS_OPEN` | 꺼짐 | `1`이면 공개 주소에서도 부스 키 없이 촬영 화면과 API를 모두 엽니다 |
 | `YS_COMPOSE_SLOTS` | 2 | 동시에 합성하는 사진 수. 나머지는 차례로 기다립니다. 한 장에 메모리 약 350MB. 코어가 8개 이상이면 3~4 |
 | `YS_KEEP_HOURS` | 72 | 사진 보관 시간. 지나면 자동 삭제 |
 | `YS_MATTING_SIZE` | 640 | 합성 정밀도(내부 해상도). 서버가 느리면 512로 낮추세요 |
+| `YS_DEVICE` | auto | 매팅 장치. `auto`면 GPU(CUDA)가 있을 때 GPU, `cpu`면 항상 CPU |
+| `YS_MATTING_MODEL` | mobilenetv3 | `resnet50`은 머리카락 경계가 더 섬세합니다(GPU 서버용, 이미지 빌드 때 받아 둠) |
 | `YS_BEAUTY` | 1 | 장소 빛 필터·인물 보정 세기. `0`이면 끄고, 더 진하게는 `1.3` 정도 |
 | `YS_OUT_DIR` | `output/` | 사진 저장 위치 |
 

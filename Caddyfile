@@ -1,0 +1,24 @@
+# 플랜 A-2: 공유기 포트포워딩(80·443 → 이 컴퓨터) + Caddy가 Let's Encrypt 인증서를 자동으로 받는다.
+# 이 도메인으로 온 요청만 부스로 넘긴다 (IP로 직접 들어온 요청은 응답하지 않는다).
+# Host 헤더를 그대로 넘기므로 main.py의 guard_public이 공개 요청으로 알아본다
+{$YS_DOMAIN} {
+	encode zstd gzip
+
+	# 검색엔진에 올라가지 않게 한다 (방문객 사진 주소가 검색되면 안 된다)
+	header X-Robots-Tag "noindex, nofollow, noarchive"
+	respond /robots.txt "User-agent: *
+Disallow: /
+" 200
+
+	# 로봇 막기: 크롤러·스크립트 도구·빈 User-Agent, 그리고 취약점 스캐너가 두드리는 주소
+	@bots {
+		header_regexp User-Agent (?i)(bot|crawl|spider|slurp|scrap|fetch|python|curl|wget|httpx|go-http|java/|okhttp|libwww|axios|node-fetch|headless|phantom|selenium|playwright|puppeteer|scan|nmap|masscan|zgrab|nikto|sqlmap|censys|shodan|semrush|ahrefs|mj12|dotbot|petal|bytespider|gptbot|claudebot|ccbot|perplexity|facebookexternalhit|kakaotalk-scrap)
+	}
+	@noua not header User-Agent *
+	@probes path *.php /wp-* /wordpress* /.env* /.git* /admin* /phpmyadmin* /cgi-bin* /vendor/* /actuator* /xmlrpc* /server-status
+	respond @bots 403
+	respond @noua 403
+	respond @probes 404
+
+	reverse_proxy booth:8080
+}

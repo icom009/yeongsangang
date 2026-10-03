@@ -1,8 +1,10 @@
 # 영산강 포토부스 실행
 #
-# 플랜 A (집 컴퓨터 서버 + 인터넷 https 주소)
-#   cp .env.example .env        # 도메인, 터널 토큰, 부스 키 채우기
-#   docker compose --profile online up -d --build
+# 플랜 A (집 컴퓨터 서버 + 인터넷 https 주소). 둘 중 하나:
+#   cp .env.example .env        # 도메인, 부스 키 (터널이면 터널 토큰도) 채우기
+#   A-1 Cloudflare Tunnel:  docker compose --profile online up -d --build
+#   A-2 포트포워딩 + Caddy:  docker compose --profile web up -d --build
+#       (공유기에서 TCP 80·443(+UDP 443)을 이 컴퓨터 내부 IP로 포워딩, 도메인 A 레코드 = 집 공인 IP)
 #   부스 기기에서 https://<도메인>/?key=<부스 키> 를 한 번 열면 그 기기는 계속 촬영 화면을 쓸 수 있다
 #
 # 플랜 B (현장 노트북 + 공유기, 인터넷 없이 로컬만)
@@ -22,6 +24,7 @@ services:
     environment:
       YS_PUBLIC_URL: ${YS_PUBLIC_URL:-}
       YS_BOOTH_KEY: ${YS_BOOTH_KEY:-}
+      YS_OPEN: ${YS_OPEN:-}
       YS_KEEP_HOURS: ${YS_KEEP_HOURS:-168}
       YS_BEAUTY: ${YS_BEAUTY:-1}
     volumes:
@@ -36,3 +39,24 @@ services:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
     depends_on:
       - booth
+
+  caddy:
+    image: caddy:2
+    profiles: ["web"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      YS_DOMAIN: ${YS_DOMAIN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # 발급받은 인증서 (지우면 다시 발급, 너무 자주면 발급 제한에 걸린다)
+      - caddy_config:/config
+    depends_on:
+      - booth
+
+volumes:
+  caddy_data:
+  caddy_config:

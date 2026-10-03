@@ -65,7 +65,7 @@ def _key_ok(value):
 
 @app.middleware('http')
 async def guard_public(request: Request, call_next):
-    if not _from_internet(request) or request.url.path.startswith(PUBLIC_PATHS):
+    if config.OPEN or not _from_internet(request) or request.url.path.startswith(PUBLIC_PATHS):
         return await call_next(request)
     # 인터넷으로 부스 화면을 쓰는 기기(플랜 A): https://주소/?key=부스키 로 한 번 열면 쿠키로 기억한다
     if _key_ok(request.cookies.get(BOOTH_COOKIE)):

@@ -32,9 +32,19 @@ def _get_session():
                 # 동시에 합성하는 수만큼 CPU를 나눠 써서 서로 다투지 않게 한다
                 opts.intra_op_num_threads = max(1, (os.cpu_count() or 4) // config.COMPOSE_SLOTS)
                 opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-                _session = ort.InferenceSession(
-                    str(ensure_model()), opts, providers=['CPUExecutionProvider'])
+                _session = ort.InferenceSession(str(ensure_model()), opts, providers=_providers(ort))
+                print(f'[합성] 매팅 장치: {_session.get_providers()[0]}', flush=True)
     return _session
+
+
+def _providers(ort):
+    """GPU(CUDA)가 있으면 쓰고, 없거나 YS_DEVICE=cpu면 CPU로 돈다 (현장 노트북은 CPU)."""
+    if config.DEVICE != 'cpu' and 'CUDAExecutionProvider' in ort.get_available_providers():
+        if hasattr(ort, 'preload_dlls'):  # pip로 깐 CUDA·cuDNN 라이브러리를 찾아 올린다
+            ort.preload_dlls()
+        return [('CUDAExecutionProvider', {'cudnn_conv_algo_search': 'HEURISTIC'}),
+                'CPUExecutionProvider']
+    return ['CPUExecutionProvider']
 
 
 def read_image(path):

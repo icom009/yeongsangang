@@ -1,0 +1,21 @@
+# GPU(NVIDIA) 서버용 덧붙임. 집 컴퓨터(RTX)에서만 쓴다. 현장 노트북(플랜 B)은 이 파일 없이 CPU로 돈다.
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile web up -d --build
+# .env에 COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml 를 넣어 두면 -f 없이 그대로 쓸 수 있다
+services:
+  booth:
+    build:
+      args:
+        ORT: onnxruntime-gpu[cuda,cudnn]
+        MATTING: resnet50
+    image: yeongsangang-booth:gpu
+    environment:
+      YS_DEVICE: ${YS_DEVICE:-auto}
+      YS_MATTING_SIZE: ${YS_MATTING_SIZE:-640}
+      YS_COMPOSE_SLOTS: ${YS_COMPOSE_SLOTS:-3}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

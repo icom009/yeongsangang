@@ -22,11 +22,19 @@ BOOTH_KEY = os.environ.get('YS_BOOTH_KEY', '')
 KEEP_HOURS = float(os.environ.get('YS_KEEP_HOURS', 72))
 
 # Robust Video Matting (MobileNetV3). 여러 명·작은 인물·머리카락 경계에 강하다
-MATTING_MODEL = MODEL_DIR / 'rvm_mobilenetv3.onnx'
+# mobilenetv3: 가볍다 (CPU 노트북). resnet50: 머리카락 경계가 더 섬세하고 잘못 잡는 일이 적다 (GPU 서버, 매팅 약 30ms)
+MATTING_NAME = os.environ.get('YS_MATTING_MODEL', 'mobilenetv3')
+if MATTING_NAME not in ('mobilenetv3', 'resnet50'):
+    raise ValueError(f'YS_MATTING_MODEL은 mobilenetv3 또는 resnet50: {MATTING_NAME}')
+MATTING_MODEL = MODEL_DIR / f'rvm_{MATTING_NAME}.onnx'
 MATTING_URL = ('https://github.com/PeterL1n/RobustVideoMatting/releases/download/'
-               'v1.0.0/rvm_mobilenetv3_fp32.onnx')
-# 매팅 시 내부 해상도(긴 변). 높을수록 경계가 정밀하지만 느려진다
+               f'v1.0.0/rvm_{MATTING_NAME}_fp32.onnx')
+# 매팅 시 내부 해상도(긴 변). RVM은 512~640쯤이 가장 좋고, 1000 넘게 올리면 오히려 경계가 뭉개진다
 MATTING_SIZE = int(os.environ.get('YS_MATTING_SIZE', 640))
+# 1이면 인터넷(공개 주소)에서도 부스 키 없이 촬영 화면·API를 모두 연다
+OPEN = os.environ.get('YS_OPEN') == '1'
+# 매팅 장치. auto면 GPU(CUDA)가 있을 때 GPU, cpu면 항상 CPU
+DEVICE = os.environ.get('YS_DEVICE', 'auto').lower()
 # 동시에 합성하는 사진 수. 나머지는 차례로 기다린다 (한 장에 메모리 약 350MB, CPU를 나눠 쓴다)
 COMPOSE_SLOTS = max(1, int(os.environ.get('YS_COMPOSE_SLOTS', 2)))
 
