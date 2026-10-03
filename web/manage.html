@@ -7,120 +7,105 @@
   <meta name="theme-color" content="#0b1d22">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🗂️</text></svg>">
   <title>포토부스 사진 관리</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
   <link rel="stylesheet" href="/static/app.css">
   <style>
+    /* 옆에서 볼 수도 있는 화면이라 사진은 기본으로 감춘다. '사진 보기'를 눌러야 그때 내려받는다 */
     html, body { height: auto; min-height: 100%; }
-    .wrap { max-width: 1180px; margin: 0 auto; padding: 24px var(--gutter) 64px; }
+    .wrap { max-width: 880px; margin: 0 auto; padding: 22px var(--gutter) 64px; }
 
-    .head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; }
-    .head h1 { margin: 0; font-size: 1.35rem; letter-spacing: -.02em; }
+    .head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .head h1 { margin: 0; font-size: 1.2rem; letter-spacing: -.02em; }
     .head .spacer { flex: 1; }
 
-    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
-    .chip {
-      padding: 9px 14px; border-radius: 12px; background: var(--glass);
-      border: 1px solid var(--glass-line); font-size: .9rem; color: var(--text-dim);
-    }
-    .chip b { color: var(--text); font-weight: 700; margin-left: 6px; }
-    .chip.live b { color: var(--sail-hi); }
+    .sum { color: var(--text-dim); font-size: .9rem; margin: 0 0 14px; }
+    .sum b { color: var(--text); }
+    .sum .load { color: var(--sail-hi); }
 
-    .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
-    .tools input[type="search"] {
-      flex: 1; min-width: 200px; padding: 11px 14px; border-radius: 12px;
+    #search {
+      width: 100%; padding: 11px 14px; margin-bottom: 14px; border-radius: 12px;
       background: var(--glass); border: 1px solid var(--glass-line);
       color: var(--text); font: inherit; font-size: .95rem;
     }
 
-    .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-    .card {
-      display: flex; flex-direction: column; border-radius: 16px; overflow: hidden;
+    .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+    .row {
       background: var(--glass); border: 1px solid var(--glass-line);
+      border-radius: 14px; padding: 11px 13px;
     }
-    .card .thumb {
-      position: relative; aspect-ratio: 1024 / 1536; background: var(--shade);
-      display: block; overflow: hidden;
+    .row .top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+    .row .when { color: var(--text-faint); font-size: .85rem; font-variant-numeric: tabular-nums; }
+    .row .place { font-weight: 600; font-size: .94rem; }
+    .row .msg {
+      flex: 1; min-width: 120px; font-family: var(--hand); font-size: 1.05rem;
+      color: var(--sail-hi); overflow-wrap: anywhere;
     }
-    .card .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .card .gone {
-      position: absolute; inset: 0; display: grid; place-items: center;
-      color: var(--text-faint); font-size: .9rem; text-align: center; padding: 16px;
+    .row .tag {
+      padding: 2px 8px; border-radius: 999px; font-size: .74rem; color: var(--text-faint);
+      border: 1px solid var(--glass-line);
     }
-    .card .body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
-    .card .when { color: var(--text-faint); font-size: .82rem; }
-    .card .place { font-weight: 600; font-size: .95rem; }
-    .card .msg {
-      font-family: var(--hand); font-size: 1.05rem; color: var(--sail-hi);
-      overflow-wrap: anywhere;
+    .row .tag.ai { color: var(--sail-hi); border-color: rgba(255, 210, 122, .4); }
+    .row .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+    .row .acts .btn { min-height: 34px; padding: 0 11px; font-size: .85rem; border-radius: 10px; }
+    .row .acts .btn.danger { color: #ffb4a8; }
+    .row .peek { margin-top: 10px; }
+    .row .peek img {
+      max-width: 260px; width: 100%; border-radius: 10px; display: block;
     }
-    .tags { display: flex; flex-wrap: wrap; gap: 5px; }
-    .tag {
-      padding: 3px 8px; border-radius: 999px; font-size: .74rem; color: var(--text-dim);
-      background: rgba(255, 255, 255, .07); border: 1px solid var(--glass-line);
-    }
-    .tag.ai { color: var(--sail-hi); border-color: rgba(255, 210, 122, .4); }
-    .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
-    .acts .btn { min-height: 36px; padding: 0 12px; font-size: .86rem; border-radius: 10px; }
-    .acts .btn.danger { color: #ffb4a8; }
+    .row.gone .place::after { content: ' · 삭제됨'; color: var(--text-faint); font-weight: 400; }
 
-    .more { display: grid; place-items: center; margin-top: 22px; }
-    .empty { padding: 60px 0; text-align: center; color: var(--text-faint); }
+    .more { display: grid; place-items: center; margin-top: 18px; }
+    .empty { padding: 50px 0; text-align: center; color: var(--text-faint); }
 
     dialog {
       border: 0; border-radius: 18px; padding: 0; color: var(--text);
       background: #122a31; box-shadow: 0 40px 80px -20px rgba(0, 0, 0, .7);
-      max-width: 400px; width: calc(100% - 32px);
+      max-width: 360px; width: calc(100% - 32px);
     }
-    dialog::backdrop { background: rgba(4, 12, 15, .72); backdrop-filter: blur(3px); }
-    dialog .inner { padding: 24px; display: flex; flex-direction: column; gap: 14px; }
-    dialog h2 { margin: 0; font-size: 1.1rem; }
-    dialog p { margin: 0; color: var(--text-dim); font-size: .9rem; }
+    dialog::backdrop { background: rgba(4, 12, 15, .75); }
+    dialog .inner { padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+    dialog h2 { margin: 0; font-size: 1.05rem; }
+    dialog p { margin: 0; color: var(--text-dim); font-size: .88rem; }
     dialog input[type="password"], dialog input[type="email"] {
       padding: 12px 14px; border-radius: 12px; background: rgba(0, 0, 0, .25);
       border: 1px solid var(--glass-line); color: var(--text); font: inherit;
     }
-    dialog label { display: flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: .9rem; }
-    dialog .row { display: flex; gap: 8px; }
-    dialog .row .btn { flex: 1; }
-    dialog .err { color: #ffb4a8; font-size: .88rem; min-height: 1.2em; }
+    dialog label { display: flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: .88rem; }
+    dialog .row2 { display: flex; gap: 8px; }
+    dialog .row2 .btn { flex: 1; }
+    dialog .err { color: #ffb4a8; font-size: .86rem; min-height: 1.1em; }
     dialog img.qr { width: 100%; border-radius: 12px; background: #fff; }
     dialog .link {
-      font-size: .8rem; color: var(--text-faint); overflow-wrap: anywhere;
+      font-size: .78rem; color: var(--text-faint); overflow-wrap: anywhere;
       background: rgba(0, 0, 0, .25); padding: 8px 10px; border-radius: 10px;
     }
 
     .toast {
-      position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
       background: #16343c; border: 1px solid var(--glass-line); color: var(--text);
-      padding: 12px 18px; border-radius: 999px; font-size: .92rem; z-index: 99;
-      box-shadow: 0 18px 40px -12px rgba(0, 0, 0, .7);
+      padding: 11px 18px; border-radius: 999px; font-size: .9rem; z-index: 99;
     }
   </style>
 </head>
 <body>
 <div class="wrap">
   <div class="head">
-    <h1>포토부스 사진 관리</h1>
+    <h1>사진 관리</h1>
     <div class="spacer"></div>
     <button class="btn btn-glass btn-sm" id="refreshBtn" type="button">새로 고침</button>
     <button class="btn btn-glass btn-sm" id="lockBtn" type="button">잠그기</button>
   </div>
 
-  <div class="chips" id="chips" hidden></div>
+  <p class="sum" id="sum" hidden></p>
+  <input type="search" id="search" placeholder="한마디·장소·사진 ID로 찾기" autocomplete="off" hidden>
 
-  <div class="tools" hidden id="tools">
-    <input type="search" id="search" placeholder="한마디·장소·사진 ID로 찾기" autocomplete="off">
-    <button class="btn btn-glass btn-sm" id="searchBtn" type="button">찾기</button>
-  </div>
-
-  <div class="grid" id="grid"></div>
+  <ul class="list" id="list"></ul>
   <p class="empty" id="empty" hidden>아직 완성된 사진이 없어요.</p>
   <div class="more"><button class="btn btn-glass" id="moreBtn" type="button" hidden>더 보기</button></div>
 </div>
 
 <dialog id="loginDlg">
-  <form class="inner" method="dialog" id="loginForm">
+  <form class="inner" id="loginForm">
     <h2>관리 비밀번호</h2>
     <p>완성된 사진 이력을 보고 다시 보내는 화면이에요.</p>
     <input type="password" id="pw" placeholder="비밀번호" autocomplete="current-password" required>
@@ -135,7 +120,7 @@
     <p id="qrWhen"></p>
     <img class="qr" id="qrImg" alt="사진 받기 QR코드">
     <p class="link" id="qrLink"></p>
-    <div class="row">
+    <div class="row2">
       <button class="btn btn-glass btn-sm" id="qrCopy" type="button">링크 복사</button>
       <button class="btn btn-glass btn-sm" id="qrClose" type="button">닫기</button>
     </div>
@@ -149,7 +134,7 @@
     <input type="email" id="mailTo" placeholder="받는 사람 메일 주소" required>
     <label><input type="checkbox" id="mailAttach" checked> 사진 파일도 첨부하기</label>
     <p class="err" id="mailErr"></p>
-    <div class="row">
+    <div class="row2">
       <button class="btn btn-sail btn-sm" id="mailSend" type="submit">보내기</button>
       <button class="btn btn-glass btn-sm" id="mailClose" type="button">닫기</button>
     </div>
@@ -158,8 +143,9 @@
 
 <script>
   const $ = (s) => document.querySelector(s);
-  const PAGE = 24;
-  const state = { offset: 0, total: 0, q: '', mail: false, sid: null };
+  const PAGE = 30;
+  const state = { offset: 0, total: 0, q: '', mail: false };
+  let cur = null;
 
   function toast(msg) {
     document.querySelector('.toast')?.remove();
@@ -181,8 +167,19 @@
     return res.json();
   }
 
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+
+  function fmtWhen(t) {
+    const d = new Date(t * 1000);
+    const two = (n) => String(n).padStart(2, '0');
+    return `${two(d.getMonth() + 1)}.${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
+  }
+
   /* ---------- 들어가기 ---------- */
   function openLogin() {
+    hideAll();
     const d = $('#loginDlg');
     if (!d.open) d.showModal();
     $('#pw').focus();
@@ -190,8 +187,7 @@
 
   $('#loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const btn = $('#loginBtn');
-    btn.disabled = true;
+    $('#loginBtn').disabled = true;
     try {
       await api('/api/manage/login', {
         method: 'POST',
@@ -205,87 +201,83 @@
     } catch (err) {
       $('#loginErr').textContent = err.message === '401' ? '비밀번호가 달라요.' : err.message;
     } finally {
-      btn.disabled = false;
+      $('#loginBtn').disabled = false;
     }
   });
 
   $('#lockBtn').addEventListener('click', async () => {
     await fetch('/api/manage/logout', { method: 'POST' });
-    $('#grid').innerHTML = '';
-    $('#chips').hidden = $('#tools').hidden = true;
+    $('#list').innerHTML = '';
+    $('#sum').hidden = $('#search').hidden = true;
     openLogin();
   });
 
-  /* ---------- 위쪽 요약 ---------- */
-  function fmtWhen(t) {
-    const d = new Date(t * 1000);
-    const two = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}.${two(d.getMonth() + 1)}.${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
+  /* ---------- 사진 가리기 ---------- */
+  // 사진은 눌렀을 때만 내려받아 보여 준다. 다른 사람이 화면을 봐도 사진이 떠 있지 않도록
+  function hideAll() {
+    document.querySelectorAll('.row .peek').forEach((p) => {
+      p.hidden = true;
+      p.querySelector('img')?.removeAttribute('src');
+    });
+    document.querySelectorAll('[data-act="peek"]').forEach((b) => { b.textContent = '사진 보기'; });
   }
 
+  function togglePeek(it, row, btn) {
+    const peek = row.querySelector('.peek');
+    const img = peek.querySelector('img');
+    const show = peek.hidden;
+    hideAll();
+    if (!show) return;
+    img.src = it.final;
+    peek.hidden = false;
+    btn.textContent = '사진 가리기';
+  }
+
+  /* ---------- 요약 ---------- */
   async function loadStatus() {
     const s = await api('/api/manage/status');
     state.mail = s.mail;
-    const ai = s.ai.engine === 'off'
-      ? 'AI 빛 보정 <b>꺼짐</b>'
-      : `AI(${s.ai.engine}) 대기 <b>${s.ai.waiting}</b>${s.ai.running ? ' · 작업 중' : ''}`;
-    const place = s.places[0] ? `${s.places[0][0]} ${s.places[0][1]}장` : '-';
-    $('#chips').innerHTML = [
-      `<span class="chip">전체 <b>${s.total}</b></span>`,
-      `<span class="chip">오늘 <b>${s.today}</b></span>`,
-      `<span class="chip">인기 장소 <b>${place}</b></span>`,
-      `<span class="chip live">합성 자리 <b>${s.compose.busy}/${s.compose.slots}</b></span>`,
-      `<span class="chip live">${ai}</span>`,
-      `<span class="chip">보관 <b>${Math.round(s.keepHours)}시간</b></span>`,
-    ].join('');
-    $('#chips').hidden = false;
-    $('#tools').hidden = false;
+    const ai = s.ai.engine === 'off' ? 'AI 꺼짐' : `AI 대기 ${s.ai.waiting}${s.ai.running ? '+1' : ''}`;
+    $('#sum').innerHTML = `전체 <b>${s.total}</b>장 · 오늘 <b>${s.today}</b>장`
+      + ` · <span class="load">합성 ${s.compose.busy}/${s.compose.slots} · ${ai}</span>`;
+    $('#sum').hidden = false;
+    $('#search').hidden = false;
   }
 
   /* ---------- 목록 ---------- */
-  function card(it) {
-    const el = document.createElement('article');
-    el.className = 'card';
-    el.dataset.sid = it.id;
-    const thumb = it.alive
-      ? `<a class="thumb" href="${it.final}" target="_blank" rel="noopener"><img loading="lazy" src="${it.final}" alt=""></a>`
-      : `<div class="thumb"><div class="gone">사진이 보관 기간이 지나<br>삭제됐어요</div></div>`;
+  function row(it) {
+    const el = document.createElement('li');
+    el.className = 'row' + (it.alive ? '' : ' gone');
     el.innerHTML = `
-      ${thumb}
-      <div class="body">
-        <div class="when">${fmtWhen(it.t)}</div>
-        <div class="place">${esc(it.place || '장소 미상')}</div>
-        <div class="msg">${esc(it.msg || '')}</div>
-        <div class="tags">
-          ${it.filter === null ? '<span class="tag">기록 없음</span>' : `<span class="tag">${it.filter ? '빛 필터' : '원본'}</span>`}
-          ${it.ai ? '<span class="tag ai">AI 빛 보정</span>' : ''}
-          <span class="tag">${it.id}</span>
-        </div>
-        <div class="acts">
-          <button class="btn btn-glass" data-act="qr" type="button">QR·링크</button>
-          <button class="btn btn-glass" data-act="mail" type="button">메일</button>
-          <a class="btn btn-glass" href="${it.final}?download=1" download>저장</a>
+      <div class="top">
+        <span class="when">${fmtWhen(it.t)}</span>
+        <span class="place">${esc(it.place || '장소 미상')}</span>
+        <span class="msg">${esc(it.msg || '')}</span>
+        ${it.ai ? '<span class="tag ai">AI</span>' : ''}
+        ${it.filter === null ? '<span class="tag">기록 없음</span>' : ''}
+        <span class="acts">
+          ${it.alive ? '<button class="btn btn-glass" data-act="peek" type="button">사진 보기</button>' : ''}
+          ${it.alive ? '<button class="btn btn-glass" data-act="qr" type="button">QR·링크</button>' : ''}
+          ${it.alive ? '<button class="btn btn-glass" data-act="mail" type="button">메일</button>' : ''}
           <button class="btn btn-glass danger" data-act="del" type="button">삭제</button>
-        </div>
-      </div>`;
-    el.querySelector('[data-act="qr"]').addEventListener('click', () => openQr(it));
-    el.querySelector('[data-act="mail"]').addEventListener('click', () => openMail(it));
+        </span>
+      </div>
+      <div class="peek" hidden><img alt="완성된 사진"></div>`;
+    el.querySelector('[data-act="peek"]')?.addEventListener('click', (e) => togglePeek(it, el, e.currentTarget));
+    el.querySelector('[data-act="qr"]')?.addEventListener('click', () => openQr(it));
+    el.querySelector('[data-act="mail"]')?.addEventListener('click', () => openMail(it));
     el.querySelector('[data-act="del"]').addEventListener('click', () => remove(it, el));
     return el;
-  }
-
-  function esc(s) {
-    return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   }
 
   async function loadPage(reset) {
     if (reset) {
       state.offset = 0;
-      $('#grid').innerHTML = '';
+      $('#list').innerHTML = '';
     }
     const res = await api(`/api/manage/shots?offset=${state.offset}&limit=${PAGE}&q=${encodeURIComponent(state.q)}`);
     state.total = res.total;
-    res.items.forEach((it) => $('#grid').appendChild(card(it)));
+    res.items.forEach((it) => $('#list').appendChild(row(it)));
     state.offset += res.items.length;
     $('#empty').hidden = state.total > 0;
     $('#moreBtn').hidden = state.offset >= state.total;
@@ -301,11 +293,11 @@
   }
 
   /* ---------- QR·링크 ---------- */
-  let cur = null;
   function openQr(it) {
     cur = it;
+    hideAll();  // QR만 보이게 (사진은 가린 채로)
     $('#qrWhen').textContent = `${fmtWhen(it.t)} · ${it.place || ''}`;
-    $('#qrImg').src = it.alive ? it.qr : '';
+    $('#qrImg').src = it.qr;
     $('#qrLink').textContent = it.page;
     $('#qrDlg').showModal();
   }
@@ -322,8 +314,9 @@
   /* ---------- 메일 ---------- */
   function openMail(it) {
     cur = it;
+    hideAll();
     $('#mailErr').textContent = state.mail ? '' : '메일 설정(YS_SMTP_*)이 없어요. QR·링크를 쓰세요.';
-    $('#mailSend').disabled = !state.mail || !it.alive;
+    $('#mailSend').disabled = !state.mail;
     $('#mailWhen').textContent = `${fmtWhen(it.t)} · ${it.place || ''}`;
     $('#mailDlg').showModal();
     $('#mailTo').focus();
@@ -366,12 +359,15 @@
   /* ---------- 연결 ---------- */
   $('#refreshBtn').addEventListener('click', reload);
   $('#moreBtn').addEventListener('click', () => loadPage(false).catch(() => {}));
-  $('#searchBtn').addEventListener('click', () => { state.q = $('#search').value; loadPage(true).catch(() => {}); });
-  $('#search').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { state.q = $('#search').value; loadPage(true).catch(() => {}); }
+  let findTimer = 0;
+  $('#search').addEventListener('input', () => {
+    clearTimeout(findTimer);
+    findTimer = setTimeout(() => { state.q = $('#search').value; loadPage(true).catch(() => {}); }, 350);
   });
-  // 촬영이 돌고 있으면 대기줄 숫자가 움직인다
-  setInterval(() => { if (!$('#chips').hidden) loadStatus().catch(() => {}); }, 10000);
+  // 다른 화면으로 넘어가면 사진을 다시 가린다
+  addEventListener('blur', hideAll);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) hideAll(); });
+  setInterval(() => { if (!$('#sum').hidden) loadStatus().catch(() => {}); }, 10000);
 
   reload();
 </script>
