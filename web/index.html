@@ -30,11 +30,21 @@
 <header class="topbar" id="topbar" hidden>
   <button class="brand" type="button" id="homeBtn" aria-label="처음 화면으로">영산강 포토부스</button>
   <ol class="steps" aria-label="진행 단계">
-    <li data-step="shoot"><span>1</span>배경 고르고 찍기</li>
-    <li data-step="write"><span>2</span>한마디 남기기</li>
-    <li data-step="take"><span>3</span>사진 받기</li>
+    <li data-step="place"><span>1</span>장소 고르기</li>
+    <li data-step="shoot"><span>2</span>찍기</li>
+    <li data-step="write"><span>3</span>한마디 남기기</li>
+    <li data-step="take"><span>4</span>사진 받기</li>
   </ol>
 </header>
+
+<!-- 장소 고르기 -->
+<section class="screen places" data-screen="places" hidden>
+  <div class="places-head">
+    <h1 class="places-title">어디에 서 볼까요?</h1>
+    <p class="places-lead">영산강의 여덟 장소 중 한 곳을 고르면, 그 풍경 속에 들어간 모습을 바로 볼 수 있어요.</p>
+  </div>
+  <div class="place-grid" id="placeGrid"></div>
+</section>
 
 <!-- 촬영 -->
 <section class="screen studio" data-screen="studio" hidden>
@@ -43,6 +53,9 @@
       <canvas id="stageCanvas" width="1280" height="960" aria-label="실시간 합성 미리보기"></canvas>
       <img id="resultImg" class="stage-result" alt="합성된 사진" hidden>
       <div class="stage-hint" id="stageHint">카메라를 준비하고 있어요</div>
+      <div class="stage-caption" id="stageCaption" aria-hidden="true"><span id="capTag"></span><strong id="capName"></strong></div>
+      <button class="stage-arrow prev" id="prevPlace" type="button" aria-label="이전 장소">‹</button>
+      <button class="stage-arrow next" id="nextPlace" type="button" aria-label="다음 장소">›</button>
       <div class="countdown" id="countdown" aria-live="assertive"></div>
       <div class="busy" id="busy" hidden>
         <div class="busy-bar"></div>
@@ -54,10 +67,14 @@
   </div>
 
   <aside class="panel">
-    <div class="scene" id="sceneInfo">
-      <p class="scene-index" id="sceneIndex"></p>
+    <div class="scene" id="sceneInfo" aria-live="polite">
+      <p class="scene-tag" id="sceneTag"></p>
       <h2 class="scene-name" id="sceneName"></h2>
-      <p class="scene-note" id="sceneNote"></p>
+      <p class="scene-story" id="sceneStory"></p>
+      <div class="scene-nav">
+        <span class="scene-count" id="sceneCount"></span>
+        <button class="link-btn" id="morePlacesBtn" type="button">다른 장소 고르기</button>
+      </div>
     </div>
 
     <div class="controls" id="shootControls">
@@ -80,7 +97,6 @@
     </div>
   </aside>
 
-  <div class="filmstrip" id="filmstrip" role="listbox" aria-label="배경 고르기"></div>
 </section>
 
 <!-- 꾸미기 -->

@@ -34,8 +34,8 @@ function show(name) {
     el.hidden = el.dataset.screen !== name;
   });
   $('#topbar').hidden = name === 'intro';
-  const order = ['shoot', 'write', 'take'];
-  const cur = { studio: 'shoot', write: 'write', take: 'take' }[name];
+  const order = ['place', 'shoot', 'write', 'take'];
+  const cur = { places: 'place', studio: 'shoot', write: 'write', take: 'take' }[name];
   document.querySelectorAll('.steps li').forEach((li) => {
     const i = order.indexOf(li.dataset.step);
     li.classList.toggle('on', li.dataset.step === cur);
@@ -125,8 +125,8 @@ async function start() {
       };
     }
     await live.startCamera();
-    show('studio');
-    enterStudio();
+    live.pause();
+    showPlaces();
     live.loadSegmenter().then((ok) => {
       if (!ok) {
         report('segmenter', 'live preview unavailable');
@@ -206,39 +206,76 @@ function goHome() {
   show('intro');
 }
 
-/* ---------- 촬영 화면 ---------- */
-function buildFilmstrip() {
-  const strip = $('#filmstrip');
-  strip.innerHTML = '';
+/* ---------- 장소 고르기 ---------- */
+function buildPlaces() {
+  const grid = $('#placeGrid');
+  grid.innerHTML = '';
   state.cfg.backgrounds.forEach((b) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'film';
-    btn.setAttribute('role', 'option');
+    btn.className = 'place-card';
     btn.dataset.id = b.id;
-    btn.innerHTML = `<img src="/bg/${b.id}.jpg?w=480" alt="" loading="lazy"><span></span>`;
-    btn.querySelector('span').textContent = b.name;
-    btn.addEventListener('click', () => selectBg(b.id));
-    strip.appendChild(btn);
+    btn.innerHTML = '<img alt="" loading="lazy"><span class="place-tag"></span><strong class="place-name"></strong><span class="place-story"></span>';
+    btn.querySelector('img').src = `/bg/${b.id}.jpg?w=800`;
+    btn.querySelector('.place-tag').textContent = b.place;
+    btn.querySelector('.place-name').textContent = b.name;
+    btn.querySelector('.place-story').textContent = b.story;
+    btn.addEventListener('click', () => pickPlace(b.id));
+    grid.appendChild(btn);
   });
+}
+
+function showPlaces() {
+  if (state.busy) return;
+  live?.pause();
+  document.querySelectorAll('.place-card').forEach((c) => {
+    c.classList.toggle('current', Number(c.dataset.id) === state.bg);
+  });
+  show('places');
+  resetIdle();
+}
+
+async function pickPlace(id) {
+  state.bg = id;
+  show('studio');
+  // 장소를 고르는 동안 카메라가 끊겼으면(화면 꺼짐 등) 다시 연다
+  if (!live.stream?.active) {
+    try {
+      await live.restartCamera();
+    } catch (e) {
+      report('camera-restart', `${e?.name}: ${e?.message}`);
+      toast('카메라가 끊겼어요. 화면을 한 번 눌러 주세요.');
+    }
+  }
+  enterStudio();
+}
+
+/* ---------- 촬영 화면 ---------- */
+function stepBg(delta) {
+  const list = state.cfg.backgrounds;
+  const i = list.findIndex((b) => b.id === state.bg);
+  selectBg(list[(i + delta + list.length) % list.length].id);
 }
 
 async function selectBg(id) {
   if (state.busy) return;
   state.bg = id;
   const b = bgInfo(id);
-  const total = state.cfg.backgrounds.length;
-  $('#sceneIndex').textContent = `배경 ${id} / ${total}`;
+  const list = state.cfg.backgrounds;
+  $('#sceneTag').textContent = b.place;
   $('#sceneName').textContent = b.name;
-  $('#sceneNote').textContent = b.note;
-  document.querySelectorAll('.film').forEach((f) => {
-    f.setAttribute('aria-selected', String(Number(f.dataset.id) === id));
-  });
-  document.querySelector(`.film[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  $('#sceneStory').textContent = b.story;
+  $('#sceneCount').textContent = `${list.indexOf(b) + 1} / ${list.length}`;
+  $('#capTag').textContent = b.place;
+  $('#capName').textContent = b.name;
+  const cap = $('#stageCaption');
+  cap.classList.remove('show');
+  void cap.offsetWidth;
+  cap.classList.add('show');
   try {
     live.setBackground(await loadImage(`/bg/${id}.jpg`));
   } catch {
-    toast('배경 사진을 불러오지 못했어요. 다른 배경을 골라 보세요.');
+    toast('배경 사진을 불러오지 못했어요. 다른 장소를 골라 보세요.');
   }
 }
 
@@ -474,6 +511,9 @@ function bind() {
   $('#doneBtn').addEventListener('click', goHome);
   $('#muteBtn').addEventListener('click', toggleMute);
   $('#msgInput').addEventListener('input', onMsgInput);
+  $('#prevPlace').addEventListener('click', () => stepBg(-1));
+  $('#nextPlace').addEventListener('click', () => stepBg(1));
+  $('#morePlacesBtn').addEventListener('click', showPlaces);
   $('#switchCamBtn').addEventListener('click', async () => {
     try { await live.switchCamera(); } catch { toast('카메라를 바꾸지 못했어요.'); }
   });
@@ -491,9 +531,13 @@ function bind() {
   addEventListener('keydown', (e) => {
     const onStudio = !$('[data-screen="studio"]').hidden;
     if (!onStudio || e.target.closest('button, textarea')) return;
-    if ((e.code === 'Space' || e.code === 'Enter') && !$('#shootControls').hidden) {
+    if ($('#shootControls').hidden || state.busy) return;
+    if (e.code === 'Space' || e.code === 'Enter') {
       e.preventDefault();
       shoot();
+    } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+      e.preventDefault();
+      stepBg(e.code === 'ArrowLeft' ? -1 : 1);
     }
   });
 }
@@ -507,7 +551,7 @@ async function init() {
     $('#introError').hidden = false;
     return;
   }
-  buildFilmstrip();
+  buildPlaces();
   startSlides();
 }
 
