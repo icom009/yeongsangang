@@ -6,6 +6,15 @@ const IDLE_MS = 120_000;      // 아무 조작이 없으면 처음 화면으로
 const TAKE_IDLE_SEC = 90;     // 받기 화면에서 처음으로 돌아가기까지
 const QR_DELAY_MS = 4000;     // 완성 사진을 먼저 감상한 뒤 QR 표시
 
+// 휴대폰에서 난 오류를 서버 로그로 보낸다 (현장에서 원인 확인용)
+function report(kind, msg) {
+  try {
+    navigator.sendBeacon?.('/api/log', JSON.stringify({ kind, msg: String(msg).slice(0, 800), ua: navigator.userAgent }));
+  } catch { /* 무시 */ }
+}
+addEventListener('error', (e) => report('error', `${e.message} @ ${e.filename}:${e.lineno}`));
+addEventListener('unhandledrejection', (e) => report('rejection', e.reason?.stack || e.reason));
+
 const state = {
   cfg: null,
   bg: 1,
@@ -105,12 +114,22 @@ async function start() {
   sound.unlock();
   unlockBgm();
   try {
-    if (!live) live = new LiveStage($('#stageCanvas'));
+    if (!live) {
+      live = new LiveStage($('#stageCanvas'));
+      live.onCameraLost = onCameraLost;
+      live.onSegmenterLost = (msg) => {
+        report('segmenter-lost', msg);
+        const note = $('#stageNote');
+        note.textContent = '실시간 합성 미리보기가 멈춰 카메라 화면만 보여 드려요. 찍으면 배경이 합성돼요.';
+        note.hidden = false;
+      };
+    }
     await live.startCamera();
     show('studio');
     enterStudio();
     live.loadSegmenter().then((ok) => {
       if (!ok) {
+        report('segmenter', 'live preview unavailable');
         const note = $('#stageNote');
         note.textContent = '이 기기에서는 실시간 합성 미리보기를 쓸 수 없어요. 찍으면 배경이 합성돼요.';
         note.hidden = false;
@@ -118,6 +137,7 @@ async function start() {
     });
     $('#switchCamBtn').hidden = !(await live.hasMultipleCameras());
   } catch (e) {
+    report('camera', `${e?.name}: ${e?.message}`);
     err.textContent = cameraErrorText(e);
     err.hidden = false;
   } finally {
@@ -146,6 +166,33 @@ function cameraErrorText(e) {
   }
   return '카메라를 켜지 못했어요. 다른 프로그램이 카메라를 쓰고 있지 않은지 확인해 주세요.';
 }
+
+// 카메라가 끊기면(전화·알림·화면 꺼짐 등) 자동으로 다시 연다
+let restarting = false;
+async function onCameraLost(reason) {
+  if (restarting || $('[data-screen="studio"]').hidden || state.busy) return;
+  restarting = true;
+  report('camera-lost', reason);
+  try {
+    await live.restartCamera();
+  } catch (e) {
+    report('camera-restart', `${e?.name}: ${e?.message}`);
+    toast('카메라가 끊겼어요. 화면을 한 번 눌러 주세요.');
+    addEventListener('pointerdown', () => live.restartCamera().catch(() => {}), { once: true });
+  } finally {
+    restarting = false;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!live) return;
+  const onStudio = !$('[data-screen="studio"]').hidden;
+  if (document.hidden) {
+    live.pause();
+  } else if (onStudio && $('#reviewControls').hidden) {
+    if (live.stream?.active) live.resume(); else onCameraLost('visible');
+  }
+});
 
 function goHome() {
   clearTimeout(idleTimer);
@@ -234,7 +281,8 @@ async function shoot() {
   let blob;
   try {
     blob = await live.capture();
-  } catch {
+  } catch (e) {
+    report('capture', e?.message || e);
     toast('사진을 찍지 못했어요. 다시 찍어 주세요.');
     return finishShoot(false);
   }
@@ -257,6 +305,7 @@ async function shoot() {
     $('#resultImg').src = img.src;
     finishShoot(true);
   } catch (e) {
+    report('compose', e?.message || e);
     toast(e.message || '합성하지 못했어요. 다시 찍어 주세요.');
     finishShoot(false);
   }

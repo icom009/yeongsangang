@@ -2,10 +2,22 @@
 // 최종 사진은 서버가 더 정밀한 모델(RVM)로 다시 만든다.
 const MP_VERSION = '1.0.1';
 const MP_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
-const MODEL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/'
-  + 'selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
+const MODELS = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/';
+// PC: 정밀한 다중 분류 모델(16MB, 0번 마스크 = 배경)
+// 휴대폰: 가벼운 셀피 모델(250KB, 0번 마스크 = 사람) — 발열·끊김 방지
+const MODEL_DESKTOP = { url: `${MODELS}selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite`, person: false };
+const MODEL_MOBILE = { url: `${MODELS}selfie_segmenter/float16/latest/selfie_segmenter.tflite`, person: true };
+const IS_MOBILE = matchMedia('(pointer: coarse)').matches;
 const ASPECT = 4 / 3;
 const FADE_MS = 450;
+
+// iOS Safari는 OffscreenCanvas에 카메라 영상을 그리면 빈 화면이 될 수 있어 일반 캔버스를 쓴다
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  return c;
+}
 
 const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -15,15 +27,34 @@ const smoothstep = (a, b, x) => {
 export class LiveStage {
   constructor(canvas) {
     this.canvas = canvas;
+    if (IS_MOBILE) { // 휴대폰은 그리는 해상도를 낮춰 부담을 줄인다
+      canvas.width = 960;
+      canvas.height = 720;
+    }
     this.ctx = canvas.getContext('2d');
     this.W = canvas.width;
     this.H = canvas.height;
 
+    // iOS는 화면(DOM)에 붙지 않은 video의 프레임 갱신을 멈추므로, 보이지 않게 붙여 둔다
     this.video = document.createElement('video');
-    this.video.playsInline = true;
+    this.video.setAttribute('playsinline', '');
+    this.video.setAttribute('autoplay', '');
     this.video.muted = true;
+    Object.assign(this.video.style, {
+      position: 'fixed', left: '0', top: '0', width: '2px', height: '2px',
+      opacity: '0', pointerEvents: 'none', zIndex: '-1',
+    });
+    document.body.appendChild(this.video);
 
-    this.person = new OffscreenCanvas(this.W, this.H);
+    this.model = IS_MOBILE ? MODEL_MOBILE : MODEL_DESKTOP;
+    this.segEvery = IS_MOBILE ? 66 : 33; // 인물 분리 주기(ms). 휴대폰은 초당 15회
+    this.lastSeg = 0;
+    this.segFails = 0;
+    this.stallSince = 0;
+    this.lastVideoTime = -1;
+    this.onCameraLost = null;
+
+    this.person = makeCanvas(this.W, this.H);
     this.pctx = this.person.getContext('2d');
     this.mask = null;
     this.mctx = null;
@@ -58,9 +89,13 @@ export class LiveStage {
     this.facing = set.facingMode || facing || 'user';
     // 전면 카메라는 거울처럼, 후면 카메라는 보이는 그대로
     this.mirror = this.facing !== 'environment';
+    this.stream.getVideoTracks().forEach((t) => {
+      t.addEventListener('ended', () => this.onCameraLost?.('ended'));
+    });
     this.video.srcObject = this.stream;
     await this.video.play();
     this.prev = null;
+    this.stallSince = 0;
     this.resume();
   }
 
@@ -106,7 +141,7 @@ export class LiveStage {
       const { FilesetResolver, ImageSegmenter } = await import(`${MP_BASE}/vision_bundle.mjs`);
       const fileset = await FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
       const make = (delegate) => ImageSegmenter.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: MODEL, delegate },
+        baseOptions: { modelAssetPath: this.model.url, delegate },
         runningMode: 'VIDEO',
         outputCategoryMask: false,
         outputConfidenceMasks: true,
@@ -119,6 +154,7 @@ export class LiveStage {
       return true;
     } catch (e) {
       console.warn('segmenter unavailable', e);
+      this.loadError = String(e?.message || e);
       return false;
     }
   }
@@ -139,7 +175,12 @@ export class LiveStage {
     this.running = true;
     const loop = (t) => {
       if (!this.running) return;
-      this.draw(t);
+      try {
+        this.watchdog(t);
+        this.draw(t);
+      } catch (e) {
+        console.warn(e); // 한 프레임 오류로 미리보기 전체가 멈추지 않게
+      }
       this.raf = requestAnimationFrame(loop);
     };
     this.raf = requestAnimationFrame(loop);
@@ -148,6 +189,34 @@ export class LiveStage {
   pause() {
     this.running = false;
     cancelAnimationFrame(this.raf);
+  }
+
+  // 카메라 영상이 멈추면 다시 재생하고, 그래도 안 되면 카메라를 다시 연다
+  watchdog(now) {
+    if (this.frozen || !this.stream) return;
+    const t = this.video.currentTime;
+    if (t !== this.lastVideoTime) {
+      this.lastVideoTime = t;
+      this.stallSince = 0;
+      return;
+    }
+    if (!this.stallSince) {
+      this.stallSince = now;
+      return;
+    }
+    const stalled = now - this.stallSince;
+    if (stalled > 1200 && this.video.paused) this.video.play().catch(() => {});
+    const track = this.stream.getVideoTracks()[0];
+    if (stalled > 3000 || !track || track.readyState === 'ended') {
+      this.stallSince = now;
+      this.onCameraLost?.('stalled');
+    }
+  }
+
+  async restartCamera() {
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+    await this.startCamera();
   }
 
   // 촬영 직후: 마지막 미리보기 장면을 멈춰 둔다
@@ -177,22 +246,33 @@ export class LiveStage {
 
   updateMask(now) {
     if (!this.segmenter || this.video.currentTime === this.lastTime) return;
+    if (now - this.lastSeg < this.segEvery) return;
+    this.lastSeg = now;
     this.lastTime = this.video.currentTime;
     let result;
     try {
       result = this.segmenter.segmentForVideo(this.video, now);
     } catch (e) {
       console.warn(e);
+      // 계속 실패하면(GPU 문제 등) 합성을 끄고 카메라 화면만 보여 준다
+      if (++this.segFails > 20) {
+        this.segmenter = null;
+        this.mask = null;
+        this.onSegmenterLost?.(String(e?.message || e));
+      }
       return;
     }
+    this.segFails = 0;
     const masks = result.confidenceMasks;
     if (!masks || !masks.length) return;
-    const bg = masks[0];
-    const w = bg.width;
-    const h = bg.height;
-    const conf = bg.getAsFloat32Array();
+    const first = masks[0];
+    const w = first.width;
+    const h = first.height;
+    const raw = first.getAsFloat32Array();
+    masks.forEach((m) => m.close());
+    const conf = this.blur(raw, w, h);
     if (!this.mask || this.mask.width !== w || this.mask.height !== h) {
-      this.mask = new OffscreenCanvas(w, h);
+      this.mask = makeCanvas(w, h);
       this.mctx = this.mask.getContext('2d');
       this.maskData = this.mctx.createImageData(w, h);
       this.maskData.data.fill(255);
@@ -203,13 +283,37 @@ export class LiveStage {
     const prev = this.prev;
     for (let i = 0; i < conf.length; i++) {
       // 경계를 또렷하게 + 이전 프레임과 섞어 깜빡임 줄이기
-      const a = smoothstep(0.3, 0.72, 1 - conf[i]);
+      const fg = this.model.person ? conf[i] : 1 - conf[i];
+      const a = smoothstep(0.3, 0.72, fg);
       const m = prev[i] * 0.35 + a * 0.65;
       prev[i] = m;
       d[i * 4 + 3] = m * 255;
     }
     this.mctx.putImageData(this.maskData, 0, 0);
-    masks.forEach((m) => m.close());
+  }
+
+  // 작은 마스크에 3x3 박스 블러: 캔버스 filter보다 훨씬 가볍고 모든 브라우저에서 같다
+  blur(src, w, h) {
+    if (!this.tmp || this.tmp.length !== src.length) {
+      this.tmp = new Float32Array(src.length);
+      this.out = new Float32Array(src.length);
+    }
+    const { tmp, out } = this;
+    for (let y = 0; y < h; y++) {
+      const r = y * w;
+      for (let x = 0; x < w; x++) {
+        const l = x > 0 ? x - 1 : x;
+        const rr = x < w - 1 ? x + 1 : x;
+        tmp[r + x] = (src[r + l] + src[r + x] + src[r + rr]) / 3;
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      const u = (y > 0 ? y - 1 : y) * w;
+      const c = y * w;
+      const d = (y < h - 1 ? y + 1 : y) * w;
+      for (let x = 0; x < w; x++) out[c + x] = (tmp[u + x] + tmp[c + x] + tmp[d + x]) / 3;
+    }
+    return out;
   }
 
   draw(now) {
@@ -241,9 +345,7 @@ export class LiveStage {
         p.globalCompositeOperation = 'destination-in';
         p.imageSmoothingEnabled = true;
         p.imageSmoothingQuality = 'high';
-        p.filter = 'blur(2px)';
         p.drawImage(this.mask, sx * mx, sy * my, sw * mx, sh * my, 0, 0, W, H);
-        p.filter = 'none';
       }
     }
     p.restore();
@@ -258,10 +360,13 @@ export class LiveStage {
     const { sx, sy, sw, sh } = this.crop();
     const w = Math.round(Math.min(sw, 1920));
     const h = Math.round(w / ASPECT);
-    const c = new OffscreenCanvas(w, h);
+    if (!w || !h) return Promise.reject(new Error('camera not ready'));
+    const c = makeCanvas(w, h);
     const x = c.getContext('2d');
     if (this.mirror) x.setTransform(-1, 0, 0, 1, w, 0);
     x.drawImage(this.video, sx, sy, sw, sh, 0, 0, w, h);
-    return c.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
+    return new Promise((resolve, reject) => {
+      c.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/jpeg', 0.92);
+    });
   }
 }

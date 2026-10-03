@@ -112,6 +112,13 @@ def message_font():
     return FileResponse(config.FONT, media_type='font/ttf', headers=LONG_CACHE)
 
 
+@app.post('/api/log')
+async def client_log(request: Request):
+    body = (await request.body())[:2000].decode('utf-8', 'replace')
+    print(f'[client {request.client.host if request.client else "?"}] {body}', flush=True)
+    return {'ok': True}
+
+
 @app.post('/api/shots')
 async def create_shot(photo: UploadFile = File(...), bg: int = Form(...)):
     if bg not in config.BG_IDS:
@@ -123,7 +130,10 @@ async def create_shot(photo: UploadFile = File(...), bg: int = Form(...)):
     if img is None:
         raise HTTPException(400, '사진을 읽지 못했어요. 다시 찍어 주세요.')
 
-    out = await asyncio.to_thread(compose.compose, img, bg)
+    try:
+        out = await asyncio.to_thread(compose.compose, img, bg)
+    except compose.NoPersonError:
+        raise HTTPException(422, '사진에서 사람을 찾지 못했어요. 화면 안에 들어와서 다시 찍어 주세요.')
     sid = storage.new_id()
     cv2.imwrite(str(storage.path(sid, 'shot')), out, [cv2.IMWRITE_JPEG_QUALITY, 93])
     return {'id': sid, 'shot': f'/media/{sid}/shot.jpg'}

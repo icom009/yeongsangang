@@ -7,6 +7,10 @@ import numpy as np
 
 from . import config
 
+class NoPersonError(Exception):
+    pass
+
+
 _session = None
 _lock = threading.Lock()
 
@@ -129,6 +133,8 @@ def compose(photo_bgr, bg_id, w=config.SHOT_W, h=config.SHOT_H):
     bg = cover(read_image(config.BG_DIR / f'bg_{bg_id}.png'), w, h)
 
     a = matte(photo)
+    if float((a > 0.5).mean()) < 0.01:
+        raise NoPersonError()
     img = photo.astype(np.float32) / 255
     bgf = bg.astype(np.float32) / 255
 
