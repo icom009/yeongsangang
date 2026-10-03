@@ -27,6 +27,8 @@ from . import compose, config, frame, storage
 
 _engine = None          # None | 'local' | 'api'
 _queue = None           # asyncio.Queue
+_gate = None            # 촬영 합성 자리(main의 세마포어). 손님이 기다리는 쪽을 먼저 보낸다
+_running = None         # 지금 만들고 있는 사진 id
 _states = OrderedDict()  # sid -> {'state': pending|ready|failed, 'message': 한마디}
 _MAX_STATES = 256
 _lock = threading.Lock()
@@ -51,6 +53,12 @@ def external():
 
 def info():
     return {'on': enabled(), 'external': external()}
+
+
+def queue_info():
+    """관리 화면에 보여 줄 대기줄 상태."""
+    return {'engine': _engine or 'off', 'waiting': _queue.qsize() if _queue else 0,
+            'running': _running is not None, 'size': config.AI_QUEUE}
 
 
 # ---------- 엔진 고르기 ----------
@@ -81,9 +89,11 @@ def detect():
 
 # ---------- 대기줄 ----------
 
-async def start():
-    """작업 일꾼과 엔진 감시를 띄운다. 돌려준 작업들은 서버가 내려갈 때 취소한다."""
-    global _queue
+async def start(gate=None):
+    """작업 일꾼과 엔진 감시를 띄운다. 돌려준 작업들은 서버가 내려갈 때 취소한다.
+    gate는 촬영 합성 자리를 재는 세마포어. AI는 그 자리가 빌 때까지 기다린다."""
+    global _queue, _gate
+    _gate = gate
     if config.AI_MODE == 'off':
         print('[AI] 빛 보정 끔 (YS_AI=off)', flush=True)
         return []
@@ -97,15 +107,33 @@ async def _watch():
         await asyncio.sleep(30 if _engine is None else 600)
 
 
+async def _wait_for_idle(limit=30):
+    """촬영 합성이 자리를 다 쓰고 있으면 AI는 잠깐 비켜 준다 (손님이 기다리는 쪽이 먼저).
+    너무 오래 기다리지는 않는다. 계속 밀리면 TTL에 걸려 알아서 버려진다."""
+    for _ in range(int(limit * 2)):
+        if _gate is None or not _gate.locked():
+            return
+        await asyncio.sleep(0.5)
+
+
 async def _worker():
+    global _running
     while True:
         job = await _queue.get()
         try:
+            waited = time.time() - job['t']
+            if waited > config.AI_TTL:  # 방문객이 이미 사진을 받아 갔다
+                _mark(job['sid'], 'failed')
+                print(f'[AI] {waited:.0f}초 묵어 건너뜀 {job["sid"]}', flush=True)
+                continue
+            await _wait_for_idle()
+            _running = job['sid']
             await asyncio.to_thread(_run, job)
         except Exception as e:  # 어떤 실패도 촬영 흐름에 영향이 없어야 한다
             _mark(job['sid'], 'failed')
             print(f'[AI] 실패 {job["sid"]}: {e}', flush=True)
         finally:
+            _running = None
             _queue.task_done()
 
 

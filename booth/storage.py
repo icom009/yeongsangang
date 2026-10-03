@@ -7,7 +7,7 @@ from functools import lru_cache
 import cv2
 import numpy as np
 
-from . import config
+from . import config, records
 from .compose import foreground_mask, read_image
 
 _ID = re.compile(r'^[A-Za-z0-9_-]{10,32}$')
@@ -29,8 +29,19 @@ def path(sid, kind):
     return config.OUT_DIR / f'{sid}_{kind}.jpg'
 
 
+def remove(sid):
+    """한 사진의 모든 파일을 지운다 (관리 화면에서 지울 때)."""
+    removed = 0
+    for kind in KINDS:
+        p = path(sid, kind)
+        if p.exists():
+            p.unlink()
+            removed += 1
+    return removed
+
+
 def cleanup():
-    """보관 시간이 지난 사진을 지운다."""
+    """보관 시간이 지난 사진과 그 기록을 지운다."""
     limit = time.time() - config.KEEP_HOURS * 3600
     removed = 0
     for p in config.OUT_DIR.glob('*.jpg'):
@@ -40,6 +51,7 @@ def cleanup():
                 removed += 1
         except FileNotFoundError:
             pass
+    records.prune(limit)
     return removed
 
 

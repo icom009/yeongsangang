@@ -30,6 +30,13 @@ services:
       # 생성형 AI 빛 보정: auto면 로컬 IC-Light(docker-compose.ai.yml) → 외부 API 키 → 끔
       YS_AI: ${YS_AI:-auto}
       YS_AI_KEY: ${YS_AI_KEY:-}
+      # 관리 화면(/manage) 비밀번호와 메일 재전송 설정
+      YS_MANAGE_KEY: ${YS_MANAGE_KEY:-}
+      YS_SMTP_HOST: ${YS_SMTP_HOST:-}
+      YS_SMTP_PORT: ${YS_SMTP_PORT:-587}
+      YS_SMTP_USER: ${YS_SMTP_USER:-}
+      YS_SMTP_PASS: ${YS_SMTP_PASS:-}
+      YS_SMTP_FROM: ${YS_SMTP_FROM:-}
     volumes:
       - ./output:/app/output   # 사진은 컨테이너를 지워도 남도록 이 폴더에 저장
 

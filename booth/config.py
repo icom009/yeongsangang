@@ -54,10 +54,30 @@ AI_URL = os.environ.get('YS_AI_URL', 'http://ic-light:8000').rstrip('/')
 AI_KEY = os.environ.get('YS_AI_KEY', '')
 AI_API_MODEL = os.environ.get('YS_AI_API_MODEL', 'gemini-3.1-flash-image')
 AI_TIMEOUT = float(os.environ.get('YS_AI_TIMEOUT', 120))
-# 동시에 기다릴 수 있는 AI 작업 수. 넘치면 그냥 건너뛴다 (촬영 흐름은 절대 기다리지 않는다)
-AI_QUEUE = max(1, int(os.environ.get('YS_AI_QUEUE', 3)))
+# 기다릴 수 있는 AI 작업 수. 넘치면 그냥 건너뛴다 (촬영 흐름은 절대 기다리지 않는다)
+AI_QUEUE = max(1, int(os.environ.get('YS_AI_QUEUE', 8)))
+# 대기줄에서 이만큼(초) 넘게 묵은 작업은 건너뛴다 (방문객이 이미 사진을 받아 갔다)
+AI_TTL = float(os.environ.get('YS_AI_TTL', 180))
 # AI에 넣는 사진 크기(긴 변). SD1.5 기반이라 1024쯤이 알맞다
 AI_SIZE = int(os.environ.get('YS_AI_SIZE', 1024))
+
+# 관리 화면(/manage) 비밀번호. 사진 이력을 보고 다시 보내는 곳이라 현장에서 꼭 바꿔 쓰세요
+# (compose가 빈 값을 넘길 수 있으므로 비어 있으면 기본값으로 되돌린다. 빈 비밀번호는 절대 두지 않는다)
+MANAGE_KEY = os.environ.get('YS_MANAGE_KEY') or 'ysg2026!'
+
+# 관리 화면에서 사진을 메일로 다시 보낼 때 쓰는 계정. 비우면 메일 보내기 단추가 꺼진다
+# (Gmail이면 2단계 인증 뒤 '앱 비밀번호'를 YS_SMTP_PASS에 넣는다)
+SMTP_HOST = os.environ.get('YS_SMTP_HOST', '')
+SMTP_PORT = int(os.environ.get('YS_SMTP_PORT') or 587)
+SMTP_USER = os.environ.get('YS_SMTP_USER', '')
+SMTP_PASS = os.environ.get('YS_SMTP_PASS', '')
+SMTP_FROM = os.environ.get('YS_SMTP_FROM', '') or SMTP_USER
+SMTP_SECURITY = os.environ.get('YS_SMTP_SECURITY') or 'starttls'  # starttls | ssl | none
+
+
+def mail_ready():
+    return bool(SMTP_HOST and SMTP_FROM)
+
 
 # 합성 결과 크기. 프레임 사진 칸(876x660)과 같은 4:3 비율
 SHOT_W, SHOT_H = 1600, 1200

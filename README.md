@@ -87,6 +87,23 @@ docker compose --env-file .env.local up -d        # 부스 화면: http://localh
 - **이미지:** 인터넷이 되는 곳에서 **미리 빌드**해 두세요. 합성 모델과 실시간 미리보기(MediaPipe) 파일을 빌드할 때 이미지 안에 받아 두므로, 현장에서는 인터넷 없이 돌아갑니다.
 - **방문객:** 같은 공유기 Wi-Fi에 붙어 QR을 열어야 해서, 현장에서 받아 가야 합니다. 공유기에서 노트북 IP를 고정(DHCP 예약)해 두세요.
 
+**관리 화면 `/manage`**
+
+완성된 사진의 이력을 보고, 받기 링크·QR을 다시 꺼내고, 메일로 다시 보내고, 지우는 곳입니다.
+
+- 주소는 `https://<도메인>/manage` (현장 노트북이면 `http://localhost:8080/manage`). 열면 비밀번호 창이 뜹니다.
+- **비밀번호는 `YS_MANAGE_KEY`입니다. 기본값(`ysg2026!`)을 그대로 쓰지 말고 `.env`에서 바꾸세요.** 공개 주소로도 열리는 화면이라 비밀번호가 유일한 자물쇠입니다(5분에 10번 틀리면 잠깁니다).
+- 보이는 것: 시간, 장소, 한마디, 완성 사진, 빛 필터/원본, AI 빛 보정 여부, 사진 ID. 방문객 이름·연락처는 받지도 남기지도 않습니다.
+- 할 수 있는 것: QR 다시 보기, 링크 복사, 사진 저장, **메일로 다시 보내기**(받는 사람 주소를 그때 입력), 삭제(사진 파일과 기록을 함께 지우고 방문객 링크도 닫힙니다).
+- 위쪽 숫자는 지금 서버가 지고 있는 일입니다: `합성 자리 1/3`(동시에 합성 중인 사진), `AI 대기 2`(빛 보정 대기줄).
+- 이력은 `output/records.jsonl`에 한 줄씩 쌓이고, 사진이 보관 기간을 넘겨 지워질 때 함께 정리됩니다.
+- 메일을 쓰려면 `.env`에 `YS_SMTP_*`를 채웁니다(Gmail이면 2단계 인증 뒤 '앱 비밀번호'). 비워 두면 메일 단추만 꺼지고 QR·링크는 그대로 씁니다.
+
+**여러 명이 한꺼번에 찍을 때**
+
+- 합성은 `YS_COMPOSE_SLOTS`장씩 차례로 처리하고 나머지는 도착 순서대로 기다립니다.
+- AI 빛 보정은 따로 대기줄(`YS_AI_QUEUE`, 기본 8장)에 쌓입니다. **촬영 합성이 자리를 다 쓰고 있으면 AI는 비켜서 기다립니다**(손님이 기다리는 쪽이 먼저). 대기줄이 넘치거나 `YS_AI_TTL`(기본 180초)보다 오래 묵은 작업은 그냥 버립니다 — 그 사진은 AI 버전 없이 넘어가고 촬영·QR 흐름은 그대로입니다.
+
 **사진 주고받기와 파일 관리**
 
 - **부스 → 서버:** 촬영 원본 JPEG을 `POST /api/shots`로 보냅니다.
@@ -124,7 +141,14 @@ docker compose --env-file .env.local up -d        # 부스 화면: http://localh
 | `YS_AI_KEY` | 없음 | 외부 이미지 편집 API 키 (넣으면 얼굴 사진이 바깥으로 나가고, 부스에 안내 문구가 뜹니다) |
 | `YS_AI_API_MODEL` | gemini-3.1-flash-image | 외부 엔진 모델 이름 |
 | `YS_AI_SIZE` | 1024 | AI에 넣는 사진 크기(긴 변) |
-| `YS_AI_QUEUE` | 3 | AI 대기줄 길이. 넘치면 그 사진은 AI 버전 없이 넘어갑니다 |
+| `YS_AI_QUEUE` | 8 | AI 대기줄 길이. 넘치면 그 사진은 AI 버전 없이 넘어갑니다 |
+| `YS_AI_TTL` | 180 | 대기줄에서 이만큼(초) 넘게 묵은 AI 작업은 건너뜁니다 (방문객이 이미 받아 갔음) |
+| `YS_MANAGE_KEY` | `ysg2026!` | 관리 화면(`/manage`) 비밀번호. **현장에서 꼭 바꾸세요** |
+| `YS_SMTP_HOST` | 없음 | 메일 재전송용 SMTP 서버 (예: `smtp.gmail.com`). 비우면 메일 단추가 꺼집니다 |
+| `YS_SMTP_PORT` | 587 | SMTP 포트 |
+| `YS_SMTP_USER` / `YS_SMTP_PASS` | 없음 | SMTP 계정과 비밀번호 (Gmail은 '앱 비밀번호') |
+| `YS_SMTP_FROM` | `YS_SMTP_USER` | 보내는 사람 주소 |
+| `YS_SMTP_SECURITY` | starttls | `starttls`·`ssl`·`none` |
 
 Render(`RENDER_EXTERNAL_URL`)와 Hugging Face Spaces(`SPACE_HOST`)에서는 외부 주소를 자동으로 잡습니다.
 
@@ -137,8 +161,10 @@ booth/frame.py     프레임·문구 렌더링, QR코드
 booth/storage.py   사진 파일 관리, 자동 정리
 booth/config.py    배경 목록, 프레임 좌표, 설정
 booth/ai.py        생성형 AI 빛 보정 (선택, 뒤에서 돈다)
+booth/records.py   완성 사진 이력 (output/records.jsonl)
+booth/mail.py      관리 화면의 메일 재전송 (선택)
 services/ic-light/ IC-Light 재조명 서비스 (GPU 컨테이너, 선택)
-web/               화면 (index.html, app.js, live.js, sound.js, app.css, photo.html)
+web/               화면 (index.html, app.js, live.js, sound.js, app.css, photo.html, manage.html)
 ```
 
 배경을 추가하려면 `backgrounds/bg_N.png`를 넣고 `booth/config.py`의 `BACKGROUNDS`에 이름·장소·이야기와 `look`(해 위치, 빛 색 등)을 추가합니다.

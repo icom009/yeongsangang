@@ -1,5 +1,7 @@
 import asyncio
 import contextlib
+import hashlib
+import hmac
 import html
 import mimetypes
 import os
@@ -7,6 +9,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import time
 from urllib.parse import urlsplit
 
 import cv2
@@ -16,7 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from booth import ai, compose, config, frame, storage
+from booth import ai, compose, config, frame, mail, records, storage
 
 # 실시간 미리보기 모듈(.mjs)·wasm을 브라우저가 받아들이도록 형식을 명시 (OS마다 기본값이 다르다)
 mimetypes.add_type('text/javascript', '.mjs')
@@ -39,7 +42,7 @@ async def lifespan(_):
     # 모델은 첫 촬영 전에 미리 올려 둔다 (첫 손님이 기다리지 않도록)
     await asyncio.to_thread(compose.warmup)
     # AI 빛 보정은 있으면 쓰고 없으면 그냥 끈다 (촬영 흐름과 무관하게 뒤에서 돈다)
-    tasks = [asyncio.create_task(_cleanup_loop()), *await ai.start()]
+    tasks = [asyncio.create_task(_cleanup_loop()), *await ai.start(_compose_gate)]
     yield
     for task in tasks:
         task.cancel()
@@ -174,6 +177,7 @@ async def client_log(request: Request):
 # 합성은 CPU·메모리를 많이 쓰므로 동시에 COMPOSE_SLOTS장까지만, 나머지는 도착 순서대로 기다린다.
 # (여러 부스가 한꺼번에 찍어도 메모리가 넘쳐 서버 전체가 멈추지 않도록)
 _compose_gate = asyncio.Semaphore(config.COMPOSE_SLOTS)
+_busy = 0  # 지금 합성 중이거나 차례를 기다리는 사진 수 (관리 화면에 보여 준다)
 
 
 @app.post('/api/shots')
@@ -187,12 +191,18 @@ async def create_shot(photo: UploadFile = File(...), bg: int = Form(...)):
     if img is None:
         raise HTTPException(400, '사진을 읽지 못했어요. 다시 찍어 주세요.')
 
-    async with _compose_gate:
-        styled, plain, person, alpha = await asyncio.to_thread(compose.compose, img, bg)
+    global _busy
+    _busy += 1
+    try:
+        async with _compose_gate:
+            styled, plain, person, alpha = await asyncio.to_thread(compose.compose, img, bg)
+    finally:
+        _busy -= 1
     sid = storage.new_id()
     q = [cv2.IMWRITE_JPEG_QUALITY, 93]
     cv2.imwrite(str(storage.path(sid, 'shot')), styled, q)
     cv2.imwrite(str(storage.path(sid, 'plain')), plain, q)
+    records.note_shot(sid, bg)  # 어떤 장소였는지 기억했다가 '완성하기' 때 이력에 적는다
     ai.submit(sid, plain, alpha, bg)  # AI 버전은 뒤에서 만든다 (여기서 기다리지 않는다)
     return {
         'id': sid,
@@ -219,6 +229,7 @@ async def finalize(sid: str, body: FinalBody, request: Request):
     # 고르지 않은 쪽 사진은 더 쓸 일이 없으니 바로 지운다 (용량·개인정보)
     plain.unlink(missing_ok=True)
     ai.note_final(sid, body.message)  # AI 버전도 같은 한마디로 프레임에 담는다
+    records.add(sid, body.message, body.filter)  # 관리 화면 이력
     return {
         'id': sid,
         'final': f'/media/{sid}/final.jpg',
@@ -242,6 +253,126 @@ def media(sid: str, kind: str, download: int = 0):
 def qr(sid: str, request: Request):
     _need(sid, 'final')
     return Response(frame.qr_png(f'{base_url(request)}/p/{sid}'), media_type='image/png')
+
+
+# ---------- 관리 화면 (/manage) ----------
+# 사진 이력을 보고, 링크·QR을 다시 꺼내고, 메일로 다시 보내고, 지우는 곳.
+# 공개 주소로도 열리므로(YS_OPEN=1) 비밀번호가 유일한 자물쇠다. 현장에서 꼭 바꿔 쓸 것
+MANAGE_COOKIE = 'ys_manage'
+_manage_tries = {}
+
+
+def _manage_token():
+    """비밀번호를 쿠키에 그대로 담지 않으려고 한 번 섞는다."""
+    return hmac.new(config.MANAGE_KEY.encode(), b'ys-manage', hashlib.sha256).hexdigest()
+
+
+def _need_manage(request: Request):
+    if not secrets.compare_digest(request.cookies.get(MANAGE_COOKIE, ''), _manage_token()):
+        raise HTTPException(401, '관리 비밀번호를 입력해 주세요.')
+
+
+class LoginBody(BaseModel):
+    password: str = Field('', max_length=200)
+
+
+class MailBody(BaseModel):
+    to: str = Field('', max_length=200)
+    attach: bool = True
+
+
+@app.get('/manage', response_class=HTMLResponse)
+def manage_page():
+    return FileResponse(config.WEB_DIR / 'manage.html', headers=NO_STORE)
+
+
+@app.post('/api/manage/login')
+async def manage_login(body: LoginBody, request: Request):
+    ip = request.client.host if request.client else '?'
+    now = time.time()
+    hits = [t for t in _manage_tries.get(ip, []) if now - t < 300]
+    if len(hits) >= 10:  # 비밀번호 무차별 대입 막기
+        raise HTTPException(429, '시도가 너무 많아요. 5분 뒤에 다시 해 주세요.')
+    if not secrets.compare_digest(body.password, config.MANAGE_KEY):
+        _manage_tries[ip] = hits + [now]
+        await asyncio.sleep(0.5)
+        raise HTTPException(401, '비밀번호가 달라요.')
+    _manage_tries.pop(ip, None)
+    res = JSONResponse({'ok': True})
+    res.set_cookie(MANAGE_COOKIE, _manage_token(), max_age=60 * 60 * 12, httponly=True,
+                   secure=request.url.scheme == 'https', samesite='lax')
+    return res
+
+
+@app.post('/api/manage/logout')
+def manage_logout():
+    res = JSONResponse({'ok': True})
+    res.delete_cookie(MANAGE_COOKIE)
+    return res
+
+
+@app.get('/api/manage/status')
+def manage_status(request: Request):
+    _need_manage(request)
+    return {
+        **records.stats(),
+        'compose': {'slots': config.COMPOSE_SLOTS, 'busy': _busy},
+        'ai': ai.queue_info(),
+        'mail': config.mail_ready(),
+        'keepHours': config.KEEP_HOURS,
+    }
+
+
+@app.get('/api/manage/shots')
+def manage_shots(request: Request, offset: int = 0, limit: int = 40, q: str = ''):
+    _need_manage(request)
+    rows = records.load()
+    key = q.strip()
+    if key:
+        rows = [r for r in rows
+                if key in r.get('msg', '') or key in r.get('place', '') or key == r.get('id')]
+    offset = max(0, offset)
+    items = []
+    for r in rows[offset:offset + min(100, max(1, limit))]:
+        sid = r['id']
+        ok = storage.valid_id(sid)
+        items.append({**r,
+                      'alive': ok and storage.path(sid, 'final').exists(),
+                      'ai': ok and storage.path(sid, 'aifinal').exists(),
+                      'final': f'/media/{sid}/final.jpg',
+                      'shot': f'/media/{sid}/shot.jpg',
+                      'qr': f'/api/shots/{sid}/qr.png',
+                      'page': f'{base_url(request)}/p/{sid}'})
+    return {'total': len(rows), 'offset': offset, 'items': items}
+
+
+@app.delete('/api/manage/shots/{sid}')
+async def manage_delete(sid: str, request: Request):
+    _need_manage(request)
+    if not storage.valid_id(sid):
+        raise HTTPException(404, '사진을 찾을 수 없어요.')
+    files = await asyncio.to_thread(storage.remove, sid)
+    await asyncio.to_thread(records.remove, sid)
+    return {'ok': True, 'files': files}
+
+
+@app.post('/api/manage/shots/{sid}/mail')
+async def manage_mail(sid: str, body: MailBody, request: Request):
+    """사진을 메일로 다시 보낸다. 설정이 없으면 관리 화면에서 단추가 꺼져 있다."""
+    _need_manage(request)
+    final = _need(sid, 'final')
+    to = body.to.strip()
+    if '@' not in to or len(to) < 5:
+        raise HTTPException(400, '메일 주소를 다시 확인해 주세요.')
+    if not config.mail_ready():
+        raise HTTPException(400, '메일 설정(YS_SMTP_*)이 없어요. 링크 복사나 QR을 쓰세요.')
+    data = await asyncio.to_thread(final.read_bytes) if body.attach else None
+    try:
+        await asyncio.to_thread(mail.send, to, f'{base_url(request)}/p/{sid}', data)
+    except Exception as e:
+        print(f'[메일] 실패 {sid} -> {to}: {e}', flush=True)
+        raise HTTPException(502, '메일을 보내지 못했어요. 설정을 확인해 주세요.')
+    return {'ok': True}
 
 
 @app.get('/p/{sid}/ai')

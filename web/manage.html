@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b1d22">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🗂️</text></svg>">
+  <title>포토부스 사진 관리</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+  <style>
+    html, body { height: auto; min-height: 100%; }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 24px var(--gutter) 64px; }
+
+    .head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .head h1 { margin: 0; font-size: 1.35rem; letter-spacing: -.02em; }
+    .head .spacer { flex: 1; }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+    .chip {
+      padding: 9px 14px; border-radius: 12px; background: var(--glass);
+      border: 1px solid var(--glass-line); font-size: .9rem; color: var(--text-dim);
+    }
+    .chip b { color: var(--text); font-weight: 700; margin-left: 6px; }
+    .chip.live b { color: var(--sail-hi); }
+
+    .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+    .tools input[type="search"] {
+      flex: 1; min-width: 200px; padding: 11px 14px; border-radius: 12px;
+      background: var(--glass); border: 1px solid var(--glass-line);
+      color: var(--text); font: inherit; font-size: .95rem;
+    }
+
+    .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+    .card {
+      display: flex; flex-direction: column; border-radius: 16px; overflow: hidden;
+      background: var(--glass); border: 1px solid var(--glass-line);
+    }
+    .card .thumb {
+      position: relative; aspect-ratio: 1024 / 1536; background: var(--shade);
+      display: block; overflow: hidden;
+    }
+    .card .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .card .gone {
+      position: absolute; inset: 0; display: grid; place-items: center;
+      color: var(--text-faint); font-size: .9rem; text-align: center; padding: 16px;
+    }
+    .card .body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+    .card .when { color: var(--text-faint); font-size: .82rem; }
+    .card .place { font-weight: 600; font-size: .95rem; }
+    .card .msg {
+      font-family: var(--hand); font-size: 1.05rem; color: var(--sail-hi);
+      overflow-wrap: anywhere;
+    }
+    .tags { display: flex; flex-wrap: wrap; gap: 5px; }
+    .tag {
+      padding: 3px 8px; border-radius: 999px; font-size: .74rem; color: var(--text-dim);
+      background: rgba(255, 255, 255, .07); border: 1px solid var(--glass-line);
+    }
+    .tag.ai { color: var(--sail-hi); border-color: rgba(255, 210, 122, .4); }
+    .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+    .acts .btn { min-height: 36px; padding: 0 12px; font-size: .86rem; border-radius: 10px; }
+    .acts .btn.danger { color: #ffb4a8; }
+
+    .more { display: grid; place-items: center; margin-top: 22px; }
+    .empty { padding: 60px 0; text-align: center; color: var(--text-faint); }
+
+    dialog {
+      border: 0; border-radius: 18px; padding: 0; color: var(--text);
+      background: #122a31; box-shadow: 0 40px 80px -20px rgba(0, 0, 0, .7);
+      max-width: 400px; width: calc(100% - 32px);
+    }
+    dialog::backdrop { background: rgba(4, 12, 15, .72); backdrop-filter: blur(3px); }
+    dialog .inner { padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+    dialog h2 { margin: 0; font-size: 1.1rem; }
+    dialog p { margin: 0; color: var(--text-dim); font-size: .9rem; }
+    dialog input[type="password"], dialog input[type="email"] {
+      padding: 12px 14px; border-radius: 12px; background: rgba(0, 0, 0, .25);
+      border: 1px solid var(--glass-line); color: var(--text); font: inherit;
+    }
+    dialog label { display: flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: .9rem; }
+    dialog .row { display: flex; gap: 8px; }
+    dialog .row .btn { flex: 1; }
+    dialog .err { color: #ffb4a8; font-size: .88rem; min-height: 1.2em; }
+    dialog img.qr { width: 100%; border-radius: 12px; background: #fff; }
+    dialog .link {
+      font-size: .8rem; color: var(--text-faint); overflow-wrap: anywhere;
+      background: rgba(0, 0, 0, .25); padding: 8px 10px; border-radius: 10px;
+    }
+
+    .toast {
+      position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+      background: #16343c; border: 1px solid var(--glass-line); color: var(--text);
+      padding: 12px 18px; border-radius: 999px; font-size: .92rem; z-index: 99;
+      box-shadow: 0 18px 40px -12px rgba(0, 0, 0, .7);
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <h1>포토부스 사진 관리</h1>
+    <div class="spacer"></div>
+    <button class="btn btn-glass btn-sm" id="refreshBtn" type="button">새로 고침</button>
+    <button class="btn btn-glass btn-sm" id="lockBtn" type="button">잠그기</button>
+  </div>
+
+  <div class="chips" id="chips" hidden></div>
+
+  <div class="tools" hidden id="tools">
+    <input type="search" id="search" placeholder="한마디·장소·사진 ID로 찾기" autocomplete="off">
+    <button class="btn btn-glass btn-sm" id="searchBtn" type="button">찾기</button>
+  </div>
+
+  <div class="grid" id="grid"></div>
+  <p class="empty" id="empty" hidden>아직 완성된 사진이 없어요.</p>
+  <div class="more"><button class="btn btn-glass" id="moreBtn" type="button" hidden>더 보기</button></div>
+</div>
+
+<dialog id="loginDlg">
+  <form class="inner" method="dialog" id="loginForm">
+    <h2>관리 비밀번호</h2>
+    <p>완성된 사진 이력을 보고 다시 보내는 화면이에요.</p>
+    <input type="password" id="pw" placeholder="비밀번호" autocomplete="current-password" required>
+    <p class="err" id="loginErr"></p>
+    <button class="btn btn-sail btn-lg" id="loginBtn" type="submit">들어가기</button>
+  </form>
+</dialog>
+
+<dialog id="qrDlg">
+  <div class="inner">
+    <h2>사진 받기 QR</h2>
+    <p id="qrWhen"></p>
+    <img class="qr" id="qrImg" alt="사진 받기 QR코드">
+    <p class="link" id="qrLink"></p>
+    <div class="row">
+      <button class="btn btn-glass btn-sm" id="qrCopy" type="button">링크 복사</button>
+      <button class="btn btn-glass btn-sm" id="qrClose" type="button">닫기</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="mailDlg">
+  <form class="inner" id="mailForm">
+    <h2>메일로 다시 보내기</h2>
+    <p id="mailWhen"></p>
+    <input type="email" id="mailTo" placeholder="받는 사람 메일 주소" required>
+    <label><input type="checkbox" id="mailAttach" checked> 사진 파일도 첨부하기</label>
+    <p class="err" id="mailErr"></p>
+    <div class="row">
+      <button class="btn btn-sail btn-sm" id="mailSend" type="submit">보내기</button>
+      <button class="btn btn-glass btn-sm" id="mailClose" type="button">닫기</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  const PAGE = 24;
+  const state = { offset: 0, total: 0, q: '', mail: false, sid: null };
+
+  function toast(msg) {
+    document.querySelector('.toast')?.remove();
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3200);
+  }
+
+  async function api(url, opts) {
+    const res = await fetch(url, { cache: 'no-store', ...opts });
+    if (res.status === 401) { openLogin(); throw new Error('401'); }
+    if (!res.ok) {
+      let msg = '서버와 연결이 고르지 않아요.';
+      try { msg = (await res.json()).detail || msg; } catch { /* 본문 없음 */ }
+      throw new Error(msg);
+    }
+    return res.json();
+  }
+
+  /* ---------- 들어가기 ---------- */
+  function openLogin() {
+    const d = $('#loginDlg');
+    if (!d.open) d.showModal();
+    $('#pw').focus();
+  }
+
+  $('#loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#loginBtn');
+    btn.disabled = true;
+    try {
+      await api('/api/manage/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: $('#pw').value }),
+      });
+      $('#loginErr').textContent = '';
+      $('#pw').value = '';
+      $('#loginDlg').close();
+      reload();
+    } catch (err) {
+      $('#loginErr').textContent = err.message === '401' ? '비밀번호가 달라요.' : err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $('#lockBtn').addEventListener('click', async () => {
+    await fetch('/api/manage/logout', { method: 'POST' });
+    $('#grid').innerHTML = '';
+    $('#chips').hidden = $('#tools').hidden = true;
+    openLogin();
+  });
+
+  /* ---------- 위쪽 요약 ---------- */
+  function fmtWhen(t) {
+    const d = new Date(t * 1000);
+    const two = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}.${two(d.getMonth() + 1)}.${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
+  }
+
+  async function loadStatus() {
+    const s = await api('/api/manage/status');
+    state.mail = s.mail;
+    const ai = s.ai.engine === 'off'
+      ? 'AI 빛 보정 <b>꺼짐</b>'
+      : `AI(${s.ai.engine}) 대기 <b>${s.ai.waiting}</b>${s.ai.running ? ' · 작업 중' : ''}`;
+    const place = s.places[0] ? `${s.places[0][0]} ${s.places[0][1]}장` : '-';
+    $('#chips').innerHTML = [
+      `<span class="chip">전체 <b>${s.total}</b></span>`,
+      `<span class="chip">오늘 <b>${s.today}</b></span>`,
+      `<span class="chip">인기 장소 <b>${place}</b></span>`,
+      `<span class="chip live">합성 자리 <b>${s.compose.busy}/${s.compose.slots}</b></span>`,
+      `<span class="chip live">${ai}</span>`,
+      `<span class="chip">보관 <b>${Math.round(s.keepHours)}시간</b></span>`,
+    ].join('');
+    $('#chips').hidden = false;
+    $('#tools').hidden = false;
+  }
+
+  /* ---------- 목록 ---------- */
+  function card(it) {
+    const el = document.createElement('article');
+    el.className = 'card';
+    el.dataset.sid = it.id;
+    const thumb = it.alive
+      ? `<a class="thumb" href="${it.final}" target="_blank" rel="noopener"><img loading="lazy" src="${it.final}" alt=""></a>`
+      : `<div class="thumb"><div class="gone">사진이 보관 기간이 지나<br>삭제됐어요</div></div>`;
+    el.innerHTML = `
+      ${thumb}
+      <div class="body">
+        <div class="when">${fmtWhen(it.t)}</div>
+        <div class="place">${esc(it.place || '장소 미상')}</div>
+        <div class="msg">${esc(it.msg || '')}</div>
+        <div class="tags">
+          <span class="tag">${it.filter ? '빛 필터' : '원본'}</span>
+          ${it.ai ? '<span class="tag ai">AI 빛 보정</span>' : ''}
+          <span class="tag">${it.id}</span>
+        </div>
+        <div class="acts">
+          <button class="btn btn-glass" data-act="qr" type="button">QR·링크</button>
+          <button class="btn btn-glass" data-act="mail" type="button">메일</button>
+          <a class="btn btn-glass" href="${it.final}?download=1" download>저장</a>
+          <button class="btn btn-glass danger" data-act="del" type="button">삭제</button>
+        </div>
+      </div>`;
+    el.querySelector('[data-act="qr"]').addEventListener('click', () => openQr(it));
+    el.querySelector('[data-act="mail"]').addEventListener('click', () => openMail(it));
+    el.querySelector('[data-act="del"]').addEventListener('click', () => remove(it, el));
+    return el;
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+
+  async function loadPage(reset) {
+    if (reset) {
+      state.offset = 0;
+      $('#grid').innerHTML = '';
+    }
+    const res = await api(`/api/manage/shots?offset=${state.offset}&limit=${PAGE}&q=${encodeURIComponent(state.q)}`);
+    state.total = res.total;
+    res.items.forEach((it) => $('#grid').appendChild(card(it)));
+    state.offset += res.items.length;
+    $('#empty').hidden = state.total > 0;
+    $('#moreBtn').hidden = state.offset >= state.total;
+  }
+
+  async function reload() {
+    try {
+      await loadStatus();
+      await loadPage(true);
+    } catch (e) {
+      if (e.message !== '401') toast(e.message);
+    }
+  }
+
+  /* ---------- QR·링크 ---------- */
+  let cur = null;
+  function openQr(it) {
+    cur = it;
+    $('#qrWhen').textContent = `${fmtWhen(it.t)} · ${it.place || ''}`;
+    $('#qrImg').src = it.alive ? it.qr : '';
+    $('#qrLink').textContent = it.page;
+    $('#qrDlg').showModal();
+  }
+  $('#qrClose').addEventListener('click', () => $('#qrDlg').close());
+  $('#qrCopy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(cur.page);
+      toast('링크를 복사했어요.');
+    } catch {
+      toast('복사가 안 돼요. 주소를 직접 선택해 주세요.');
+    }
+  });
+
+  /* ---------- 메일 ---------- */
+  function openMail(it) {
+    cur = it;
+    $('#mailErr').textContent = state.mail ? '' : '메일 설정(YS_SMTP_*)이 없어요. QR·링크를 쓰세요.';
+    $('#mailSend').disabled = !state.mail || !it.alive;
+    $('#mailWhen').textContent = `${fmtWhen(it.t)} · ${it.place || ''}`;
+    $('#mailDlg').showModal();
+    $('#mailTo').focus();
+  }
+  $('#mailClose').addEventListener('click', () => $('#mailDlg').close());
+  $('#mailForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('#mailSend');
+    btn.disabled = true;
+    btn.textContent = '보내는 중…';
+    try {
+      await api(`/api/manage/shots/${cur.id}/mail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: $('#mailTo').value, attach: $('#mailAttach').checked }),
+      });
+      $('#mailDlg').close();
+      toast('메일을 보냈어요.');
+    } catch (err) {
+      if (err.message !== '401') $('#mailErr').textContent = err.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '보내기';
+    }
+  });
+
+  /* ---------- 삭제 ---------- */
+  async function remove(it, el) {
+    if (!confirm(`${fmtWhen(it.t)} 사진을 지울까요? 되돌릴 수 없고, 방문객의 받기 링크도 열리지 않게 됩니다.`)) return;
+    try {
+      await api(`/api/manage/shots/${it.id}`, { method: 'DELETE' });
+      el.remove();
+      toast('지웠어요.');
+      loadStatus().catch(() => {});
+    } catch (e) {
+      if (e.message !== '401') toast(e.message);
+    }
+  }
+
+  /* ---------- 연결 ---------- */
+  $('#refreshBtn').addEventListener('click', reload);
+  $('#moreBtn').addEventListener('click', () => loadPage(false).catch(() => {}));
+  $('#searchBtn').addEventListener('click', () => { state.q = $('#search').value; loadPage(true).catch(() => {}); });
+  $('#search').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { state.q = $('#search').value; loadPage(true).catch(() => {}); }
+  });
+  // 촬영이 돌고 있으면 대기줄 숫자가 움직인다
+  setInterval(() => { if (!$('#chips').hidden) loadStatus().catch(() => {}); }, 10000);
+
+  reload();
+</script>
+</body>
+</html>
