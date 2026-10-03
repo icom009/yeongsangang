@@ -10,7 +10,7 @@ from . import config
 from .compose import read_image
 
 _ID = re.compile(r'^[A-Za-z0-9_-]{10,32}$')
-KINDS = ('shot', 'final')
+KINDS = ('shot', 'plain', 'final')  # shot: 장소 빛 필터 적용, plain: 필터 없는 합성
 
 
 def new_id():

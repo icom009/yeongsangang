@@ -3,3 +3,7 @@
 output
 __pycache__
 model/*.onnx
+.env
+certs
+web/vendor
+.env.local

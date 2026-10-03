@@ -5,7 +5,7 @@
 ## 흐름
 
 1. **배경 고르고 찍기**: 웹캠 영상에서 사람만 분리해 고른 배경 위에 실시간으로 보여줍니다(브라우저의 MediaPipe). 타이머는 3, 5, 10초 중에서 고릅니다.
-2. **합성**: 서버가 원본 사진을 RVM 매팅 모델로 다시 합성합니다. 머리카락 경계와 원본 배경 번짐을 보정하고, 색감을 맞추고, 가장자리에 빛이 감싸는 효과를 줍니다.
+2. **합성**: 서버가 원본 사진을 RVM 매팅 모델로 다시 합성합니다. 머리카락 경계와 원본 배경 번짐을 보정하고, 색감을 맞추고, 가장자리에 빛이 감싸는 효과를 줍니다. 여기에 고른 장소의 빛(노을빛·한낮 햇살 등)에 맞춰 인물의 톤·빛 색·해 쪽 역광을 맞추고 피부를 화사하게 다듬은 필터 사진을 함께 만들어, 찍은 뒤 '필터'와 '원본' 중에서 고릅니다. 배경은 선명한 그대로 둡니다. 사람을 찾지 못하면 멈추지 않고 찍은 사진 그대로 담습니다.
 3. **한마디 남기기**: 프레임에 들어갈 문구를 손글씨체 미리보기로 확인합니다.
 4. **사진 받기**: 완성 사진을 BGM과 함께 보여준 뒤 QR코드를 띄웁니다. 휴대폰에서는 저장하거나 공유할 수 있습니다.
 
@@ -14,7 +14,7 @@
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python scripts/fetch_models.py   # 합성 모델 받기 (약 15MB, 처음 한 번)
+python scripts/fetch_models.py   # 합성 모델·미리보기 파일 받기 (약 70MB, 처음 한 번)
 python main.py                   # http://localhost:8080
 ```
 
@@ -32,6 +32,46 @@ YS_HTTPS=1 python main.py        # 화면에 나오는 https://<내부IP>:8443 �
 
 경고 없이 쓰려면 Hugging Face Spaces 같은 https 서버에 배포하거나 Cloudflare Tunnel로 주소를 여세요.
 
+## 축제 현장 배포 (Docker)
+
+방문객은 휴대폰 LTE로 QR을 열기 때문에 평소에는 **인터넷에서 열리는 https 주소**가 필요합니다. 서버 상황이 나쁠 때를 대비해 같은 이미지로 현장 로컬 운영(플랜 B)도 준비해 둡니다. 실행 방법은 `docker-compose.yml` 맨 위 주석에 있습니다.
+
+**플랜 A: 집 컴퓨터 서버 + Cloudflare Tunnel**
+
+```bash
+cp .env.example .env                              # 도메인, TUNNEL_TOKEN, YS_BOOTH_KEY
+docker compose --profile online up -d --build
+```
+
+- **부스 기기:** `https://<도메인>/?key=<YS_BOOTH_KEY>`를 한 번 열면 쿠키로 기억해서, 그 기기는 계속 촬영 화면을 쓸 수 있습니다.
+- **방문객:** QR로 `/p/<ID>` 받기 화면만 열 수 있습니다.
+- **https:** Cloudflare Tunnel이 인증서를 맡고, 공유기 포트포워딩이 필요 없습니다. Cloudflare에 연결한 도메인이 있어야 주소가 바뀌지 않습니다. 임시 주소는 다시 켤 때마다 바뀌어서 이미 나눠 준 QR이 열리지 않게 됩니다.
+
+**플랜 B: 현장 노트북 + 공유기 (인터넷 없이)**
+
+```bash
+cp .env.local.example .env.local                  # 노트북의 공유기 내부 IP
+docker compose --env-file .env.local up -d        # 부스 화면: http://localhost:8080
+```
+
+- **이미지:** 인터넷이 되는 곳에서 **미리 빌드**해 두세요. 합성 모델과 실시간 미리보기(MediaPipe) 파일을 빌드할 때 이미지 안에 받아 두므로, 현장에서는 인터넷 없이 돌아갑니다.
+- **방문객:** 같은 공유기 Wi-Fi에 붙어 QR을 열어야 해서, 현장에서 받아 가야 합니다. 공유기에서 노트북 IP를 고정(DHCP 예약)해 두세요.
+
+**사진 주고받기와 파일 관리**
+
+- **부스 → 서버:** 촬영 원본 JPEG을 `POST /api/shots`로 보냅니다.
+- **서버 → 방문객:** `/p/<ID>` 화면에서 받습니다.
+- **접근 제한:** 공개 주소로 들어온 요청은 `/p/`, `/media/`, `/static/`, `/font/`만 열고 나머지는 부스 키가 있어야 합니다(`main.py`의 `guard_public`).
+- **저장:** `output/`에 `<ID>_shot.jpg`(고른 사진)와 `<ID>_final.jpg`(프레임 사진)가 남고, 고르지 않은 쪽은 완성 직후 지웁니다.
+- **보관:** `YS_KEEP_HOURS`(compose 기본 7일)가 지나면 자동으로 지웁니다.
+- **ID:** 추측할 수 없는 무작위 16자이고 목록 보기 기능은 없습니다.
+- **용량:** 방문객 한 명당 약 1.5MB입니다.
+- **동시 접속:**
+  - 합성은 `YS_COMPOSE_SLOTS`장씩 차례로 만들어서, 여러 부스가 한꺼번에 찍어도 메모리가 늘지 않습니다.
+  - 4코어에서 16장을 한꺼번에 찍으면 첫 장은 1.8초, 마지막은 16초, 메모리는 최대 1.2GB였습니다.
+  - 방문객 300명이 동시에 사진을 받아도 2초 안에 끝났습니다. 실제로는 서버 쪽 인터넷 업로드 속도가 한계입니다(사진 한 장 약 0.7MB).
+- **행사 기간 체크:** 절전·화면 꺼짐 끄기, OS 자동 업데이트 재부팅 미루기. `restart: unless-stopped`로 Docker가 켜지면 자동 시작됩니다.
+
 ## 환경 변수
 
 | 이름 | 기본값 | 설명 |
@@ -39,8 +79,11 @@ YS_HTTPS=1 python main.py        # 화면에 나오는 https://<내부IP>:8443 �
 | `PORT` | 8080 (https 모드는 8443) | 서버 포트 |
 | `YS_HTTPS` | 꺼짐 | `1`이면 자체 서명 인증서로 https 실행 (휴대폰 카메라용) |
 | `YS_PUBLIC_URL` | 자동 | QR코드에 넣을 외부 주소 (예: `https://booth.example.com`) |
+| `YS_BOOTH_KEY` | 없음 | 공개 주소에서 부스 화면을 열 때 쓰는 열쇠 (`/?key=값`으로 한 번 열기) |
+| `YS_COMPOSE_SLOTS` | 2 | 동시에 합성하는 사진 수. 나머지는 차례로 기다립니다. 한 장에 메모리 약 350MB. 코어가 8개 이상이면 3~4 |
 | `YS_KEEP_HOURS` | 72 | 사진 보관 시간. 지나면 자동 삭제 |
 | `YS_MATTING_SIZE` | 640 | 합성 정밀도(내부 해상도). 서버가 느리면 512로 낮추세요 |
+| `YS_BEAUTY` | 1 | 장소 빛 필터·인물 보정 세기. `0`이면 끄고, 더 진하게는 `1.3` 정도 |
 | `YS_OUT_DIR` | `output/` | 사진 저장 위치 |
 
 Render(`RENDER_EXTERNAL_URL`)와 Hugging Face Spaces(`SPACE_HOST`)에서는 외부 주소를 자동으로 잡습니다.
@@ -56,4 +99,4 @@ booth/config.py    배경 목록, 프레임 좌표, 설정
 web/               화면 (index.html, app.js, live.js, sound.js, app.css, photo.html)
 ```
 
-배경을 추가하려면 `backgrounds/bg_N.png`를 넣고 `booth/config.py`의 `BACKGROUNDS`에 이름과 설명을 추가합니다.
+배경을 추가하려면 `backgrounds/bg_N.png`를 넣고 `booth/config.py`의 `BACKGROUNDS`에 이름·장소·이야기와 `look`(해 위치, 빛 색 등)을 추가합니다.

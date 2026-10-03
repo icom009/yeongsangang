@@ -1,9 +1,13 @@
 import asyncio
 import contextlib
 import html
+import mimetypes
 import os
+import secrets
+import shutil
 import socket
 import subprocess
+from urllib.parse import urlsplit
 
 import cv2
 import numpy as np
@@ -13,6 +17,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from booth import compose, config, frame, storage
+
+# 실시간 미리보기 모듈(.mjs)·wasm을 브라우저가 받아들이도록 형식을 명시 (OS마다 기본값이 다르다)
+mimetypes.add_type('text/javascript', '.mjs')
+mimetypes.add_type('application/wasm', '.wasm')
 
 MAX_UPLOAD = 12 * 1024 * 1024
 JPEG = 'image/jpeg'
@@ -36,6 +44,40 @@ async def lifespan(_):
 
 
 app = FastAPI(title='영산강 AI 포토부스', lifespan=lifespan, docs_url=None, redoc_url=None)
+# 인터넷(터널·공개 주소)으로 들어온 요청은 방문객 받기 화면에 필요한 것만 연다.
+# 촬영·합성 API는 부스 컴퓨터(localhost·같은 Wi-Fi)에서만 쓸 수 있다
+PUBLIC_PATHS = ('/p/', '/media/', '/static/', '/font/')
+
+
+def _from_internet(request: Request):
+    if 'cf-connecting-ip' in request.headers:  # Cloudflare Tunnel을 거친 요청
+        return True
+    public = config.public_base_url()
+    return bool(public) and request.url.hostname == urlsplit(public).hostname
+
+
+BOOTH_COOKIE = 'ys_booth'
+
+
+def _key_ok(value):
+    return bool(config.BOOTH_KEY and value) and secrets.compare_digest(value, config.BOOTH_KEY)
+
+
+@app.middleware('http')
+async def guard_public(request: Request, call_next):
+    if not _from_internet(request) or request.url.path.startswith(PUBLIC_PATHS):
+        return await call_next(request)
+    # 인터넷으로 부스 화면을 쓰는 기기(플랜 A): https://주소/?key=부스키 로 한 번 열면 쿠키로 기억한다
+    if _key_ok(request.cookies.get(BOOTH_COOKIE)):
+        return await call_next(request)
+    if _key_ok(request.query_params.get('key')):
+        response = await call_next(request)
+        response.set_cookie(BOOTH_COOKIE, config.BOOTH_KEY, max_age=60 * 60 * 24 * 60,
+                            httponly=True, secure=True, samesite='lax')
+        return response
+    return Response(status_code=404)
+
+
 app.mount('/static', StaticFiles(directory=config.WEB_DIR), name='static')
 app.mount('/bgm', StaticFiles(directory=config.BGM_DIR), name='bgm')
 
@@ -119,6 +161,11 @@ async def client_log(request: Request):
     return {'ok': True}
 
 
+# 합성은 CPU·메모리를 많이 쓰므로 동시에 COMPOSE_SLOTS장까지만, 나머지는 도착 순서대로 기다린다.
+# (여러 부스가 한꺼번에 찍어도 메모리가 넘쳐 서버 전체가 멈추지 않도록)
+_compose_gate = asyncio.Semaphore(config.COMPOSE_SLOTS)
+
+
 @app.post('/api/shots')
 async def create_shot(photo: UploadFile = File(...), bg: int = Form(...)):
     if bg not in config.BG_IDS:
@@ -130,23 +177,36 @@ async def create_shot(photo: UploadFile = File(...), bg: int = Form(...)):
     if img is None:
         raise HTTPException(400, '사진을 읽지 못했어요. 다시 찍어 주세요.')
 
-    try:
-        out = await asyncio.to_thread(compose.compose, img, bg)
-    except compose.NoPersonError:
-        raise HTTPException(422, '사진에서 사람을 찾지 못했어요. 화면 안에 들어와서 다시 찍어 주세요.')
+    async with _compose_gate:
+        styled, plain, person = await asyncio.to_thread(compose.compose, img, bg)
     sid = storage.new_id()
-    cv2.imwrite(str(storage.path(sid, 'shot')), out, [cv2.IMWRITE_JPEG_QUALITY, 93])
-    return {'id': sid, 'shot': f'/media/{sid}/shot.jpg'}
+    q = [cv2.IMWRITE_JPEG_QUALITY, 93]
+    cv2.imwrite(str(storage.path(sid, 'shot')), styled, q)
+    cv2.imwrite(str(storage.path(sid, 'plain')), plain, q)
+    return {
+        'id': sid,
+        'shot': f'/media/{sid}/shot.jpg',
+        'plain': f'/media/{sid}/plain.jpg',
+        'look': config.BG_BY_ID[bg].get('look', {}).get('name', '자동 보정'),
+        'person': person,  # False면 합성 없이 찍은 그대로 (흐름은 멈추지 않는다)
+    }
 
 
 class FinalBody(BaseModel):
     message: str = Field('', max_length=80)
+    filter: bool = True
 
 
 @app.post('/api/shots/{sid}/final')
 async def finalize(sid: str, body: FinalBody, request: Request):
     shot = _need(sid, 'shot')
+    plain = storage.path(sid, 'plain')
+    if not body.filter and plain.exists():  # 재시도로 이미 정리된 뒤면 그대로 둔다
+        # 원본을 고르면 그 사진을 shot 자리에 둔다 (휴대폰 받기 화면의 '프레임 없는 사진'도 같은 사진이 되도록)
+        await asyncio.to_thread(shutil.copyfile, plain, shot)
     await asyncio.to_thread(frame.render, shot, body.message, storage.path(sid, 'final'))
+    # 고르지 않은 쪽 사진은 더 쓸 일이 없으니 바로 지운다 (용량·개인정보)
+    plain.unlink(missing_ok=True)
     return {
         'id': sid,
         'final': f'/media/{sid}/final.jpg',

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f2a2f">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛵</text></svg>">
-  <title>영산강 포토부스</title>
+  <title>영산강 AI 포토부스</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hahmlet:wght@500;700;800&display=swap">
@@ -14,41 +14,46 @@
 </head>
 <body>
 
+<!-- 고른 장소의 빛이 화면 전체에 은은하게 번지는 배경 -->
+<div class="ambient" id="ambient" aria-hidden="true"><img alt=""><img alt=""></div>
+
 <!-- 시작 -->
 <section class="screen intro" data-screen="intro">
   <div class="intro-slides" aria-hidden="true"></div>
+  <p class="intro-brand">2026 나주영산강축제</p>
   <div class="intro-body">
-    <p class="intro-place">2026 나주영산강축제</p>
-    <h1 class="intro-title">영산강 풍경 속에<br>들어가 한 장</h1>
-    <p class="intro-lead">배경을 고르면 화면 속 우리가 바로 그곳에 서 있어요.<br>찍은 사진은 QR로 휴대폰에 담아 가세요.</p>
-    <button class="btn btn-sail btn-xl" id="startBtn" type="button">카메라 켜고 시작하기</button>
+    <h1 class="intro-title">영산강 AI 포토부스</h1>
+    <p class="intro-sub">우리 가족만의 특별한 영산강 추억</p>
+    <p class="intro-lead">가고 싶은 영산강 장소를 고르면 화면 속 우리가 바로 그곳에 서 있어요. <br>완성된 사진은 QR로 휴대폰에 담아 가세요.</p>
+    <button class="btn btn-sail btn-xl" id="startBtn" type="button">체험 시작하기</button>
     <p class="intro-error" id="introError" role="alert" hidden></p>
   </div>
+  <p class="intro-caption" id="introCaption" aria-hidden="true"></p>
 </section>
 
 <!-- 공통 머리글 -->
 <header class="topbar" id="topbar" hidden>
-  <button class="brand" type="button" id="homeBtn" aria-label="처음 화면으로">영산강 포토부스</button>
-  <ol class="steps" aria-label="진행 단계">
-    <li data-step="place"><span>1</span>장소 고르기</li>
-    <li data-step="shoot"><span>2</span>찍기</li>
-    <li data-step="write"><span>3</span>한마디 남기기</li>
-    <li data-step="take"><span>4</span>사진 받기</li>
+  <button class="brand" type="button" id="homeBtn" aria-label="처음 화면으로">영산강 AI 포토부스</button>
+  <ol class="progress" aria-label="진행 단계">
+    <li data-step="place"><i></i><span>장소 고르기</span></li>
+    <li data-step="shoot"><i></i><span>찍기</span></li>
+    <li data-step="write"><i></i><span>한마디 남기기</span></li>
+    <li data-step="take"><i></i><span>사진 받기</span></li>
   </ol>
 </header>
 
-<!-- 장소 고르기 -->
+<!-- 장소 고르기: 여덟 장소를 한눈에 펼쳐 두고, 누르면 그 장소가 넓게 열린다 -->
 <section class="screen places" data-screen="places" hidden>
   <div class="places-head">
     <h1 class="places-title">어디에 서 볼까요?</h1>
-    <p class="places-lead">영산강의 여덟 장소 중 한 곳을 고르면, 그 풍경 속에 들어간 모습을 바로 볼 수 있어요.</p>
+    <p class="places-hint">사진을 누르면 그 장소가 펼쳐져요</p>
   </div>
-  <div class="place-grid" id="placeGrid"></div>
+  <div class="deck" id="placeGrid" role="listbox" aria-label="영산강의 장소"></div>
 </section>
 
 <!-- 촬영 -->
 <section class="screen studio" data-screen="studio" hidden>
-  <div class="stage-wrap">
+  <div class="stage-frame">
     <div class="stage" id="stage">
       <canvas id="stageCanvas" width="1280" height="960" aria-label="실시간 합성 미리보기"></canvas>
       <img id="resultImg" class="stage-result" alt="합성된 사진" hidden>
@@ -59,66 +64,78 @@
       <div class="countdown" id="countdown" aria-live="assertive"></div>
       <div class="busy" id="busy" hidden>
         <div class="busy-bar"></div>
-        <p>풍경 속에 자연스럽게 담는 중이에요</p>
+        <p id="busyText">풍경 속에 자연스럽게 담는 중이에요</p>
       </div>
       <div class="flash" id="flash"></div>
     </div>
-    <p class="stage-note" id="stageNote" hidden></p>
-  </div>
 
-  <aside class="panel">
-    <div class="scene" id="sceneInfo" aria-live="polite">
-      <p class="scene-tag" id="sceneTag"></p>
-      <h2 class="scene-name" id="sceneName"></h2>
-      <p class="scene-story" id="sceneStory"></p>
-      <div class="scene-nav">
-        <span class="scene-count" id="sceneCount"></span>
-        <button class="link-btn" id="morePlacesBtn" type="button">다른 장소 고르기</button>
-      </div>
-    </div>
-
-    <div class="controls" id="shootControls">
+    <div class="dock" id="shootControls">
       <div class="timer" role="radiogroup" aria-label="촬영 타이머">
-        <span class="timer-label">타이머</span>
         <button type="button" role="radio" data-sec="3" aria-checked="true">3초</button>
         <button type="button" role="radio" data-sec="5" aria-checked="false">5초</button>
         <button type="button" role="radio" data-sec="10" aria-checked="false">10초</button>
       </div>
-      <button class="shutter" id="shutterBtn" type="button">
+      <button class="shutter" id="shutterBtn" type="button" aria-label="찍기">
         <span class="shutter-ring"></span><span class="shutter-text">찍기</span>
       </button>
-      <button class="btn btn-ghost btn-sm" id="switchCamBtn" type="button" hidden>카메라 바꾸기</button>
+      <div class="dock-side">
+        <button class="btn btn-glass btn-sm" id="switchCamBtn" type="button" hidden>카메라 바꾸기</button>
+      </div>
     </div>
 
-    <div class="controls" id="reviewControls" hidden>
-      <p class="review-q">이 사진으로 할까요?</p>
-      <button class="btn btn-sail btn-lg" id="useShotBtn" type="button">이 사진으로 꾸미기</button>
-      <button class="btn btn-ghost" id="retakeBtn" type="button">다시 찍기</button>
+    <div class="dock dock-review" id="reviewControls" hidden>
+      <div class="review-look">
+        <div class="look-toggle" role="radiogroup" aria-label="사진 느낌">
+          <button type="button" role="radio" data-filter="1" aria-checked="true"><span class="look-spark" aria-hidden="true">✦</span><span id="lookName">장소 빛</span></button>
+          <button type="button" role="radio" data-filter="0" aria-checked="false">원본</button>
+        </div>
+        <p class="look-hint" id="lookHint">그곳의 햇살과 빛 색에 맞춰 자동으로 보정했어요.</p>
+      </div>
+      <div class="review-actions">
+        <button class="btn btn-glass" id="retakeBtn" type="button">다시 찍기</button>
+        <button class="btn btn-sail btn-lg" id="useShotBtn" type="button">이 사진으로 꾸미기</button>
+      </div>
     </div>
-  </aside>
+  </div>
+  <p class="stage-note" id="stageNote" hidden></p>
 
+  <div class="scene" id="sceneInfo" aria-live="polite">
+    <div class="scene-text">
+      <p class="scene-tag" id="sceneTag"></p>
+      <h2 class="scene-name" id="sceneName"></h2>
+      <p class="scene-story" id="sceneStory"></p>
+    </div>
+    <div class="scene-nav">
+      <span class="scene-count" id="sceneCount"></span>
+      <button class="btn btn-glass btn-sm" id="morePlacesBtn" type="button">다른 장소 고르기</button>
+    </div>
+  </div>
 </section>
 
 <!-- 꾸미기 -->
 <section class="screen write" data-screen="write" hidden>
-  <div class="card-preview" id="cardPreview">
-    <img class="card-frame" src="/frame.jpg" alt="">
-    <img class="card-photo" id="cardPhoto" alt="합성된 사진">
-    <p class="card-text" id="cardText"></p>
+  <div class="card-stand">
+    <div class="card-preview" id="cardPreview">
+      <img class="card-frame" src="/frame.jpg" alt="">
+      <img class="card-photo" id="cardPhoto" alt="합성된 사진">
+      <p class="card-text" id="cardText"></p>
+    </div>
   </div>
-  <div class="write-form">
-    <h2 class="write-title">사진 아래에 남길 한마디</h2>
-    <p class="write-lead">세 줄까지 쓸 수 있어요. 비워 두면 기본 문구가 들어가요.</p>
-    <textarea id="msgInput" rows="3" maxlength="60" placeholder="오늘도 함께 행복하자"></textarea>
-    <div class="msg-meta"><span id="msgCount">0 / 60</span></div>
+  <div class="sheet write-form">
+    <h2 class="sheet-title">사진 아래에 남길 한마디</h2>
+    <p class="sheet-lead">세 줄까지 쓸 수 있어요. 비워 두면 기본 문구가 들어가요.</p>
+    <div class="note">
+      <textarea id="msgInput" rows="3" maxlength="60" placeholder="오늘도 함께 행복하자" aria-label="남길 한마디"></textarea>
+      <span class="note-count" id="msgCount">0 / 60</span>
+    </div>
     <div class="chips" id="chips">
       <button type="button" class="chip">오늘도 함께 행복하자</button>
       <button type="button" class="chip">영산강에서 우리 가족</button>
       <button type="button" class="chip">노을처럼 따뜻한 하루</button>
       <button type="button" class="chip">사랑해, 오래오래</button>
     </div>
-    <div class="write-actions">
-      <button class="btn btn-ghost" id="backToShotBtn" type="button">사진 다시 고르기</button>
+    <div class="sheet-actions">
+      <button class="btn btn-glass" id="backToShotBtn" type="button">사진 다시 고르기</button>
       <button class="btn btn-sail btn-lg" id="finishBtn" type="button">완성하기</button>
     </div>
   </div>
@@ -126,9 +143,11 @@
 
 <!-- 받기 -->
 <section class="screen take" data-screen="take" hidden>
-  <figure class="take-photo">
-    <img id="finalImg" alt="완성된 사진">
-  </figure>
+  <div class="print-slot">
+    <figure class="print">
+      <img id="finalImg" alt="완성된 사진">
+    </figure>
+  </div>
   <div class="take-side">
     <h2 class="take-title">우리의 영산강 사진이<br>완성됐어요</h2>
     <div class="qr" id="qrBox">
@@ -138,7 +157,7 @@
     <p class="take-lead">휴대폰 카메라로 QR코드를 비추면<br>사진을 바로 저장할 수 있어요.</p>
     <div class="take-actions">
       <button class="btn btn-sail btn-lg" id="doneBtn" type="button">체험 마치기</button>
-      <button class="btn btn-ghost btn-sm" id="muteBtn" type="button" aria-pressed="false">음악 끄기</button>
+      <button class="btn btn-glass btn-sm" id="muteBtn" type="button" aria-pressed="false">음악 끄기</button>
     </div>
     <p class="take-idle" id="takeIdle"></p>
   </div>

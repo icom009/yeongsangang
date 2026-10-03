@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0f2a2f">
+  <meta name="theme-color" content="#0b1d22">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛵</text></svg>">
   <title>영산강 포토부스 사진</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="/static/app.css">
   <style>
     .photo-page {
+      position: relative;
       max-width: 520px; margin: 0 auto;
       padding: 28px 16px calc(36px + env(safe-area-inset-bottom));
       display: flex; flex-direction: column; gap: 18px;
@@ -23,17 +24,19 @@
       font-size: 1.85rem; letter-spacing: -.03em; line-height: 1.25;
     }
     .photo-page .shot {
-      width: 100%; border-radius: 10px;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, .4);
+      width: 100%; border-radius: 14px;
+      box-shadow: 0 40px 70px -24px rgba(0, 0, 0, .75), 0 8px 20px rgba(0, 0, 0, .25);
+      animation: print 1.6s var(--ease) both;
     }
     .photo-page .actions { display: grid; gap: 10px; }
     .photo-page .actions .btn { width: 100%; text-decoration: none; }
-    .photo-page .tip { margin: 0; color: var(--mist-dim); font-size: .9rem; text-align: center; }
+    .photo-page .tip { margin: 0; color: var(--text-dim); font-size: .9rem; text-align: center; }
     .photo-page .missing { padding: 40px 0; }
-    .photo-page .missing p { color: var(--mist-dim); }
+    .photo-page .missing p { color: var(--text-dim); }
   </style>
 </head>
 <body>
+<div class="ambient" id="ambient" aria-hidden="true"><img alt=""></div>
 <main class="photo-page" data-state="{{STATE}}" data-sid="{{SID}}">
   <header>
     <p>2026 나주영산강축제</p>
@@ -45,7 +48,7 @@
     <div class="actions" style="margin-top:18px">
       <button class="btn btn-sail btn-lg" id="shareBtn" type="button" hidden>사진 저장·공유하기</button>
       <a class="btn btn-sail btn-lg" id="saveFinal" download>프레임 사진 저장하기</a>
-      <a class="btn btn-ghost" id="saveShot" download>프레임 없는 사진 저장하기</a>
+      <a class="btn btn-glass" id="saveShot" download>프레임 없는 사진 저장하기</a>
     </div>
     <p class="tip" style="margin-top:14px">저장이 안 되면 사진을 길게 눌러 ‘사진 앱에 저장’을 고르세요.</p>
   </div>
@@ -64,6 +67,9 @@
     const final = `/media/${sid}/final.jpg`;
     document.getElementById('ready').hidden = false;
     document.getElementById('shot').src = final;
+    const amb = document.querySelector('#ambient img');
+    amb.onload = () => amb.classList.add('on');
+    amb.src = final; // 내 사진의 빛이 화면 전체에 번지게
     document.getElementById('saveFinal').href = `${final}?download=1`;
     document.getElementById('saveShot').href = `/media/${sid}/shot.jpg?download=1`;
 
@@ -74,7 +80,7 @@
         const file = new File([blob], 'yeongsangang.jpg', { type: 'image/jpeg' });
         if (!navigator.canShare({ files: [file] })) return;
         share.hidden = false;
-        document.getElementById('saveFinal').className = 'btn btn-ghost';
+        document.getElementById('saveFinal').className = 'btn btn-glass';
         share.addEventListener('click', () => {
           navigator.share({ files: [file], title: '영산강 포토부스' }).catch(() => {});
         });

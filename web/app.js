@@ -20,7 +20,9 @@ const state = {
   bg: 1,
   timer: 3,
   shotId: null,
-  shotUrl: null,
+  shotUrl: null,      // 필터 적용 사진
+  plainUrl: null,     // 필터 없는 사진
+  useFilter: true,
   busy: false,
 };
 
@@ -36,7 +38,7 @@ function show(name) {
   $('#topbar').hidden = name === 'intro';
   const order = ['place', 'shoot', 'write', 'take'];
   const cur = { places: 'place', studio: 'shoot', write: 'write', take: 'take' }[name];
-  document.querySelectorAll('.steps li').forEach((li) => {
+  document.querySelectorAll('.progress li').forEach((li) => {
     const i = order.indexOf(li.dataset.step);
     li.classList.toggle('on', li.dataset.step === cur);
     li.classList.toggle('done', i < order.indexOf(cur));
@@ -85,6 +87,25 @@ function resetIdle() {
 }
 ['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, resetIdle, { passive: true }));
 
+// 두 장의 그림을 번갈아 겹쳐 부드럽게 바꾼다 (장소의 빛 배경, 장소 고르기 배경)
+function crossfade(box, src) {
+  const imgs = box.querySelectorAll('img');
+  const cur = box.querySelector('img.on');
+  if (cur && cur.dataset.src === src) return;
+  const next = cur === imgs[0] ? imgs[1] : imgs[0];
+  next.onload = () => {
+    next.classList.add('on');
+    cur?.classList.remove('on');
+  };
+  next.dataset.src = src;
+  next.src = src;
+}
+
+// 고른 장소의 풍경을 흐리게 번져 화면 전체의 빛으로 깐다
+function setAmbient(id) {
+  crossfade($('#ambient'), `/bg/${id}.jpg?w=480`);
+}
+
 /* ---------- 시작 화면 ---------- */
 function startSlides() {
   const box = $('.intro-slides');
@@ -96,12 +117,16 @@ function startSlides() {
     return img;
   });
   let i = 0;
+  const caption = $('#introCaption');
+  const list = state.cfg.backgrounds;
   imgs[0].classList.add('on');
+  caption.textContent = `${list[0].place} · ${list[0].name}`;
   setInterval(() => {
     if ($('[data-screen="intro"]').hidden) return;
     imgs[i].classList.remove('on');
     i = (i + 1) % imgs.length;
     imgs[i].classList.add('on');
+    caption.textContent = `${list[i].place} · ${list[i].name}`;
   }, 5200);
 }
 
@@ -142,7 +167,7 @@ async function start() {
     err.hidden = false;
   } finally {
     btn.disabled = false;
-    btn.textContent = '카메라 켜고 시작하기';
+    btn.textContent = '체험 시작하기';
   }
 }
 
@@ -207,31 +232,65 @@ function goHome() {
 }
 
 /* ---------- 장소 고르기 ---------- */
+let focused = 1; // 장소 고르기 화면에서 지금 펼쳐진 장소
+
 function buildPlaces() {
-  const grid = $('#placeGrid');
-  grid.innerHTML = '';
+  const deck = $('#placeGrid');
+  deck.innerHTML = '';
+  const wide = Math.max(innerWidth, innerHeight) > 900;
   state.cfg.backgrounds.forEach((b) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'place-card';
-    btn.dataset.id = b.id;
-    btn.innerHTML = '<img alt="" loading="lazy"><span class="place-tag"></span><strong class="place-name"></strong><span class="place-story"></span>';
-    btn.querySelector('img').src = `/bg/${b.id}.jpg?w=800`;
-    btn.querySelector('.place-tag').textContent = b.place;
-    btn.querySelector('.place-name').textContent = b.name;
-    btn.querySelector('.place-story').textContent = b.story;
-    btn.addEventListener('click', () => pickPlace(b.id));
-    grid.appendChild(btn);
+    const item = document.createElement('div');
+    item.className = 'deck-item';
+    item.setAttribute('role', 'option');
+    item.tabIndex = 0;
+    item.dataset.id = b.id;
+    item.innerHTML = `
+      <img alt="" decoding="async">
+      <span class="deck-label"></span>
+      <div class="deck-info">
+        <p class="deck-where"></p>
+        <h2 class="deck-name"></h2>
+        <p class="deck-story"></p>
+        <span class="btn btn-sail btn-lg deck-go">이곳에서 찍기</span>
+      </div>`;
+    item.querySelector('img').src = `/bg/${b.id}.jpg?w=${wide ? 1600 : 800}`;
+    item.querySelector('.deck-label').textContent = b.name;
+    item.querySelector('.deck-where').textContent = b.place;
+    item.querySelector('.deck-name').textContent = b.name;
+    item.querySelector('.deck-story').textContent = b.story;
+    // 접힌 장소를 누르면 펼치고, 펼쳐진 장소를 누르면 바로 촬영으로
+    item.addEventListener('click', () => (focused === b.id ? pickPlace(b.id) : focusPlace(b.id)));
+    item.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        item.click();
+      }
+    });
+    deck.appendChild(item);
   });
+}
+
+function focusPlace(id) {
+  focused = id;
+  setAmbient(id);
+  document.querySelectorAll('.deck-item').forEach((el) => {
+    const on = Number(el.dataset.id) === id;
+    el.classList.toggle('open', on);
+    el.setAttribute('aria-selected', String(on));
+  });
+}
+
+function stepFocus(delta) {
+  const list = state.cfg.backgrounds;
+  const i = list.findIndex((b) => b.id === focused);
+  focusPlace(list[(i + delta + list.length) % list.length].id);
 }
 
 function showPlaces() {
   if (state.busy) return;
   live?.pause();
-  document.querySelectorAll('.place-card').forEach((c) => {
-    c.classList.toggle('current', Number(c.dataset.id) === state.bg);
-  });
   show('places');
+  focusPlace(state.bg);
   resetIdle();
 }
 
@@ -268,6 +327,8 @@ async function selectBg(id) {
   $('#sceneCount').textContent = `${list.indexOf(b) + 1} / ${list.length}`;
   $('#capTag').textContent = b.place;
   $('#capName').textContent = b.name;
+  setAmbient(id);
+  live.setLook(b.look?.preview);
   const cap = $('#stageCaption');
   cap.classList.remove('show');
   void cap.offsetWidth;
@@ -331,6 +392,9 @@ async function shoot() {
   live.freeze();
 
   $('#busy').hidden = false;
+  $('#busyText').textContent = '풍경 속에 자연스럽게 담는 중이에요';
+  // 여러 부스에서 한꺼번에 찍으면 서버가 차례로 만든다. 오래 걸리면 기다리는 이유를 알려 준다
+  const slow = setTimeout(() => { $('#busyText').textContent = '찍는 분들이 많아 조금 더 걸려요. 곧 완성돼요'; }, 5000);
   try {
     const fd = new FormData();
     fd.append('photo', blob, 'photo.jpg');
@@ -338,13 +402,25 @@ async function shoot() {
     const res = await api('/api/shots', { method: 'POST', body: fd });
     state.shotId = res.id;
     state.shotUrl = res.shot;
+    state.plainUrl = res.plain;
+    $('#lookName').textContent = res.look;
     const img = await loadImage(res.shot);
+    loadImage(res.plain).catch(() => {}); // 원본도 미리 받아 두어 바로 바꿔 보이게
+    setFilter(true);
+    // 사람을 못 찾으면 찍은 그대로 담고 계속 진행한다 (필터·원본이 같으므로 고르기는 숨김)
+    $('.look-toggle').hidden = !res.person;
+    if (!res.person) {
+      report('no-person', `bg ${state.bg}`);
+      $('#lookHint').textContent = '사람을 찾지 못해 배경 합성 없이 찍은 그대로 담았어요. 다시 찍어도 좋아요.';
+    }
     $('#resultImg').src = img.src;
     finishShoot(true);
   } catch (e) {
     report('compose', e?.message || e);
     toast(e.message || '합성하지 못했어요. 다시 찍어 주세요.');
     finishShoot(false);
+  } finally {
+    clearTimeout(slow);
   }
 }
 
@@ -360,6 +436,21 @@ function finishShoot(ok) {
     live.resume();
   }
   resetIdle();
+}
+
+function setFilter(on) {
+  state.useFilter = on;
+  document.querySelectorAll('.look-toggle button').forEach((b) => {
+    b.setAttribute('aria-checked', String((b.dataset.filter === '1') === on));
+  });
+  $('#lookHint').textContent = on
+    ? '그곳의 햇살과 빛 색에 맞춰 자동으로 보정했어요.'
+    : '보정 없이 배경만 합성한 사진이에요.';
+  if (state.shotId) $('#resultImg').src = on ? state.shotUrl : state.plainUrl;
+}
+
+function chosenShot() {
+  return state.useFilter ? state.shotUrl : state.plainUrl;
 }
 
 function retake() {
@@ -417,7 +508,7 @@ function fitMessage() {
 }
 
 function enterWrite() {
-  $('#cardPhoto').src = state.shotUrl;
+  $('#cardPhoto').src = chosenShot();
   show('write');
   layoutCard();
   document.fonts.load("40px 'Ownglyph PDH'").finally(fitMessage);
@@ -442,7 +533,7 @@ async function finish() {
     const res = await api(`/api/shots/${state.shotId}/final`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: $('#msgInput').value }),
+      body: JSON.stringify({ message: $('#msgInput').value, filter: state.useFilter }),
     });
     await loadImage(res.final);
     enterTake(res);
@@ -514,6 +605,19 @@ function bind() {
   $('#prevPlace').addEventListener('click', () => stepBg(-1));
   $('#nextPlace').addEventListener('click', () => stepBg(1));
   $('#morePlacesBtn').addEventListener('click', showPlaces);
+  addEventListener('keydown', (e) => {
+    if ($('[data-screen="places"]').hidden) return;
+    const prev = e.code === 'ArrowLeft' || e.code === 'ArrowUp';
+    const next = e.code === 'ArrowRight' || e.code === 'ArrowDown';
+    if (prev || next) {
+      e.preventDefault();
+      stepFocus(prev ? -1 : 1);
+      document.querySelector(`.deck-item[data-id="${focused}"]`)?.focus({ preventScroll: true });
+    }
+  });
+  document.querySelectorAll('.look-toggle button').forEach((b) => b.addEventListener('click', () => {
+    setFilter(b.dataset.filter === '1');
+  }));
   $('#switchCamBtn').addEventListener('click', async () => {
     try { await live.switchCamera(); } catch { toast('카메라를 바꾸지 못했어요.'); }
   });

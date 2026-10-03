@@ -5,3 +5,6 @@ model/*.onnx
 model/*.part
 .DS_Store
 certs/
+.env
+web/vendor/
+.env.local

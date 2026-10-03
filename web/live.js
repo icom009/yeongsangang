@@ -1,8 +1,11 @@
 // 실시간 합성 미리보기: 웹캠 → MediaPipe 인물 분리 → 고른 배경 위에 합성.
 // 최종 사진은 서버가 더 정밀한 모델(RVM)로 다시 만든다.
-const MP_VERSION = '1.0.1';
+const MP_VERSION = '1.0.1'; // scripts/fetch_models.py의 MP_VERSION과 같게
 const MP_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}`;
 const MODELS = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/';
+// 서버에 내려받아 둔 사본(scripts/fetch_models.py). 인터넷이 없는 현장에서도 미리보기가 되도록 먼저 쓴다
+const MP_LOCAL = '/static/vendor/mediapipe';
+const LOCAL_MODEL = { desktop: `${MP_LOCAL}/models/selfie_multiclass_256x256.tflite`, mobile: `${MP_LOCAL}/models/selfie_segmenter.tflite` };
 // PC: 정밀한 다중 분류 모델(16MB, 0번 마스크 = 배경)
 // 휴대폰: 가벼운 셀피 모델(250KB, 0번 마스크 = 사람) — 발열·끊김 방지
 const MODEL_DESKTOP = { url: `${MODELS}selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite`, person: false };
@@ -10,6 +13,7 @@ const MODEL_MOBILE = { url: `${MODELS}selfie_segmenter/float16/latest/selfie_seg
 const IS_MOBILE = matchMedia('(pointer: coarse)').matches;
 const ASPECT = 4 / 3;
 const FADE_MS = 450;
+const PERSON_FILTER = 'brightness(1.06) saturate(1.1) contrast(1.03)'; // 장소별 look이 없을 때
 
 // iOS Safari는 OffscreenCanvas에 카메라 영상을 그리면 빈 화면이 될 수 있어 일반 캔버스를 쓴다
 function makeCanvas(w, h) {
@@ -53,6 +57,7 @@ export class LiveStage {
     this.stallSince = 0;
     this.lastVideoTime = -1;
     this.onCameraLost = null;
+    this.personFilter = PERSON_FILTER;
 
     this.person = makeCanvas(this.W, this.H);
     this.pctx = this.person.getContext('2d');
@@ -138,10 +143,13 @@ export class LiveStage {
   /* ---------- 인물 분리 모델 ---------- */
   async loadSegmenter() {
     try {
-      const { FilesetResolver, ImageSegmenter } = await import(`${MP_BASE}/vision_bundle.mjs`);
-      const fileset = await FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
+      const local = await fetch(`${MP_LOCAL}/vision_bundle.mjs`, { method: 'HEAD' }).then((r) => r.ok, () => false);
+      const base = local ? MP_LOCAL : MP_BASE;
+      const modelUrl = local ? LOCAL_MODEL[IS_MOBILE ? 'mobile' : 'desktop'] : this.model.url;
+      const { FilesetResolver, ImageSegmenter } = await import(`${base}/vision_bundle.mjs`);
+      const fileset = await FilesetResolver.forVisionTasks(`${base}/wasm`);
       const make = (delegate) => ImageSegmenter.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: this.model.url, delegate },
+        baseOptions: { modelAssetPath: modelUrl, delegate },
         runningMode: 'VIDEO',
         outputCategoryMask: false,
         outputConfidenceMasks: true,
@@ -160,6 +168,11 @@ export class LiveStage {
   }
 
   /* ---------- 배경 ---------- */
+  // 장소 빛 필터를 PC 미리보기에 비슷하게 입힌다 (최종 사진은 서버가 정밀하게 보정)
+  setLook(css) {
+    this.personFilter = css || PERSON_FILTER;
+  }
+
   setBackground(img) {
     if (this.bg === img) return;
     this.bgPrev = this.bg;
@@ -351,7 +364,12 @@ export class LiveStage {
     p.restore();
 
     // 2) 인물 (모델이 없으면 카메라 화면을 그대로)
-    if (!this.segmenter || this.mask) ctx.drawImage(this.person, 0, 0);
+    // PC에서는 서버의 인물 보정(뽀샤시)과 비슷한 느낌을 가볍게 미리 보여 준다. 휴대폰은 끊김 방지로 생략
+    if (!this.segmenter || this.mask) {
+      if (!IS_MOBILE && this.mask) ctx.filter = this.personFilter;
+      ctx.drawImage(this.person, 0, 0);
+      ctx.filter = 'none';
+    }
   }
 
   /* ---------- 촬영 ---------- */
