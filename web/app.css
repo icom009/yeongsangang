@@ -154,6 +154,22 @@ img { display: block; max-width: 100%; }
   font-size: clamp(1.4rem, 2.6vw, 2.2rem); letter-spacing: -.03em; line-height: 1.3;
   color: var(--sail-hi); text-shadow: 0 2px 20px rgba(0, 0, 0, .35);
 }
+/* 한 컷 / 네 컷 고르기와 몇 번째 컷인지 알림 */
+.mode { display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--glass); border: 1px solid var(--glass-line); margin-top: 12px; }
+.mode button { min-height: 40px; padding: 0 20px; border: 0; border-radius: 999px; background: transparent; color: var(--text-dim); font: inherit; font-weight: 600; cursor: pointer; }
+.mode button[aria-pressed="true"] { background: var(--sail); color: var(--on-sail); }
+.places-random { margin: 12px 0 0 8px; vertical-align: top; }
+.cut-badge {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  padding: 8px 18px; border-radius: 999px; background: var(--shade); backdrop-filter: blur(6px);
+  border: 1px solid var(--glass-line); color: var(--text); font-weight: 700; font-size: 1.05rem; z-index: 5;
+}
+.deck-pick {
+  position: absolute; top: 14px; right: 14px; min-width: 34px; height: 34px; z-index: 4;
+  display: none; place-items: center; border-radius: 999px;
+  background: var(--sail); color: var(--on-sail); font-weight: 700; font-size: .95rem;
+}
+.picking .deck-pick.on { display: grid; }
 .intro-lead { margin: 18px 0 38px; color: var(--text-dim); font-size: clamp(1.02rem, 1.5vw, 1.22rem); line-height: 1.7; }
 .intro-notice { margin: 16px 0 0; color: var(--text-dim); font-size: .92rem; opacity: .8; }
 .intro-error { margin: 18px 0 0; max-width: 34em; color: #ffd4cf; }

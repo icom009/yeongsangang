@@ -85,6 +85,7 @@ SHOT_W, SHOT_H = 1600, 1200
 # 프레임 안 사진 칸 위치 (frame1.png 1024x1536 기준, 노란 테두리 안쪽)
 FRAME_HOLE = (74, 318, 951, 979)
 FRAME_HOLE_RADIUS = 18
+FRAME_GAP = 10  # 4컷일 때 사진 사이 틈 (사진 칸을 2x2로 나눠도 각 칸이 4:3이다)
 FRAME_TEXT_BOX = (90, 1000, 934, 1185)
 TEXT_COLOR = '#4a3420'
 DEFAULT_MESSAGE = '오늘도 함께 행복하자'

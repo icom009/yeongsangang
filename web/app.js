@@ -24,6 +24,10 @@ const state = {
   plainUrl: null,     // 필터 없는 사진
   useFilter: true,
   busy: false,
+  mode: 1,            // 1컷 또는 4컷(인생네컷)
+  picks: [],          // 4컷에서 고른 장소 네 곳
+  cuts: [],           // 찍은 사진들 {id, shot, plain, person}
+  cutIndex: 0,        // 지금 몇 번째 컷인지
 };
 
 let live = null;
@@ -227,6 +231,9 @@ function goHome() {
   live?.stopCamera();
   state.shotId = null;
   state.busy = false;
+  state.cuts = [];
+  state.cutIndex = 0;
+  setMode(1);
   $('#msgInput').value = '';
   show('intro');
 }
@@ -246,6 +253,7 @@ function buildPlaces() {
     item.dataset.id = b.id;
     item.innerHTML = `
       <img alt="" decoding="async">
+      <span class="deck-pick" aria-hidden="true"></span>
       <span class="deck-label"></span>
       <div class="deck-info">
         <p class="deck-where"></p>
@@ -267,6 +275,34 @@ function buildPlaces() {
       }
     });
     deck.appendChild(item);
+  });
+}
+
+/* 한 컷 / 네 컷(인생네컷). 네 컷이면 장소를 네 곳 담은 뒤 차례로 찍는다 */
+function setMode(m) {
+  state.mode = m;
+  state.picks = [];
+  document.querySelectorAll('#modeSwitch button').forEach((b) => {
+    b.setAttribute('aria-pressed', String(Number(b.dataset.mode) === m));
+  });
+  syncPicks();
+}
+
+function syncPicks() {
+  const four = state.mode === 4;
+  $('#placeGrid').classList.toggle('picking', four);
+  $('#randomBtn').hidden = !four;
+  $('#placesHint').textContent = four
+    ? `서로 다른 네 곳을 골라 주세요 (${state.picks.length} / 4)`
+    : '사진을 누르면 그 장소가 펼쳐져요';
+  document.querySelectorAll('.deck-item').forEach((el) => {
+    const i = state.picks.indexOf(Number(el.dataset.id));
+    const badge = el.querySelector('.deck-pick');
+    badge.classList.toggle('on', i >= 0);
+    badge.textContent = i >= 0 ? String(i + 1) : '';
+    el.querySelector('.deck-go').textContent = four
+      ? `여기 담기 ${Math.min(state.picks.length + 1, 4)} / 4`
+      : '이곳에서 찍기';
   });
 }
 
@@ -295,7 +331,24 @@ function showPlaces() {
 }
 
 async function pickPlace(id) {
-  state.bg = id;
+  if (state.mode === 4) {
+    if (state.picks.length >= 4) return;
+    state.picks.push(id);
+    syncPicks();
+    if (state.picks.length < 4) {
+      stepFocus(1);  // 다음 장소를 펼쳐 준다
+      return;
+    }
+  } else {
+    state.picks = [id];
+  }
+  startShooting();
+}
+
+async function startShooting() {
+  state.bg = state.picks[0];
+  state.cutIndex = 0;
+  state.cuts = [];
   show('studio');
   // 장소를 고르는 동안 카메라가 끊겼으면(화면 꺼짐 등) 다시 연다
   if (!live.stream?.active) {
@@ -319,6 +372,7 @@ function stepBg(delta) {
 async function selectBg(id) {
   if (state.busy) return;
   state.bg = id;
+  if (state.mode === 4 && state.picks.length === 4) state.picks[state.cutIndex] = id;
   const b = bgInfo(id);
   const list = state.cfg.backgrounds;
   $('#sceneTag').textContent = b.place;
@@ -348,9 +402,16 @@ async function selectBg(id) {
 function enterStudio() {
   setReview(false);
   $('#stageHint').hidden = true;
+  showCutBadge();
   live.resume();
   selectBg(state.bg);
   resetIdle();
+}
+
+function showCutBadge() {
+  const el = $('#cutBadge');
+  el.hidden = state.mode !== 4;
+  if (state.mode === 4) el.textContent = `${state.cutIndex + 1} / 4번째 사진`;
 }
 
 function setReview(on) {
@@ -405,20 +466,14 @@ async function shoot() {
     fd.append('photo', blob, 'photo.jpg');
     fd.append('bg', state.bg);
     const res = await api('/api/shots', { method: 'POST', body: fd });
-    state.shotId = res.id;
-    state.shotUrl = res.shot;
-    state.plainUrl = res.plain;
+    state.cuts.push({ id: res.id, shot: res.shot, plain: res.plain, person: res.person });
     $('#lookName').textContent = res.look;
-    const img = await loadImage(res.shot);
-    loadImage(res.plain).catch(() => {}); // 원본도 미리 받아 두어 바로 바꿔 보이게
-    setFilter(true);
-    // 사람을 못 찾으면 찍은 그대로 담고 계속 진행한다 (필터·원본이 같으므로 고르기는 숨김)
-    $('.look-toggle').hidden = !res.person;
-    if (!res.person) {
-      report('no-person', `bg ${state.bg}`);
-      $('#lookHint').textContent = '사람을 찾지 못해 배경 합성 없이 찍은 그대로 담았어요. 다시 찍어도 좋아요.';
+    if (!res.person) report('no-person', `bg ${state.bg}`);
+    if (state.mode === 4 && state.cuts.length < 4) {
+      await nextCut();   // 네 컷은 이어서 찍는다
+      return;
     }
-    $('#resultImg').src = img.src;
+    await showResult();
     finishShoot(true);
   } catch (e) {
     report('compose', e?.message || e);
@@ -427,6 +482,72 @@ async function shoot() {
   } finally {
     clearTimeout(slow);
   }
+}
+
+async function nextCut() {
+  state.cutIndex += 1;
+  $('#busy').hidden = true;
+  $('.studio').classList.remove('locked');
+  $('#shutterBtn').disabled = false;
+  state.busy = false;
+  await selectBg(state.picks[state.cutIndex]);
+  showCutBadge();
+  live.resume();
+  await wait(1800);  // 다음 장소를 보고 자세를 잡을 틈
+  if ($('[data-screen="studio"]').hidden || state.busy) return;
+  shoot();
+}
+
+// 서버(frame.grid)와 같은 배치로 네 컷 미리보기를 만든다
+async function makeGrid(srcs) {
+  const imgs = await Promise.all(srcs.map(loadImage));
+  const W = 1600;
+  const H = 1200;
+  const g = 10;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#f4fcff';
+  ctx.fillRect(0, 0, W, H);
+  const cw = (W - g) >> 1;
+  const ch = (H - g) >> 1;
+  imgs.forEach((im, i) => {
+    const s = Math.max(cw / im.width, ch / im.height);
+    const w = im.width * s;
+    const h = im.height * s;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect((i % 2) * (cw + g), ((i / 2) | 0) * (ch + g), cw, ch);
+    ctx.clip();
+    ctx.drawImage(im, (i % 2) * (cw + g) + (cw - w) / 2, ((i / 2) | 0) * (ch + g) + (ch - h) / 2, w, h);
+    ctx.restore();
+  });
+  return cv.toDataURL('image/jpeg', 0.92);
+}
+
+async function showResult() {
+  state.shotId = state.cuts[0].id;
+  if (state.mode === 4) {
+    $('#busyText').textContent = '네 컷을 한 장으로 모으는 중이에요';
+    [state.shotUrl, state.plainUrl] = await Promise.all([
+      makeGrid(state.cuts.map((c) => c.shot)),
+      makeGrid(state.cuts.map((c) => c.plain)),
+    ]);
+    $('#cutBadge').hidden = true;
+  } else {
+    state.shotUrl = state.cuts[0].shot;
+    state.plainUrl = state.cuts[0].plain;
+    loadImage(state.plainUrl).catch(() => {});  // 원본도 미리 받아 두어 바로 바꿔 보이게
+  }
+  setFilter(true);
+  // 사람을 못 찾으면 찍은 그대로 담고 계속 진행한다 (필터·원본이 같으므로 고르기는 숨김)
+  const person = state.cuts.some((c) => c.person);
+  $('.look-toggle').hidden = !person;
+  if (!person) {
+    $('#lookHint').textContent = '사람을 찾지 못해 배경 합성 없이 찍은 그대로 담았어요. 다시 찍어도 좋아요.';
+  }
+  $('#resultImg').src = (await loadImage(state.shotUrl)).src;
 }
 
 function finishShoot(ok) {
@@ -460,7 +581,11 @@ function chosenShot() {
 
 function retake() {
   state.shotId = null;
+  state.cuts = [];
+  state.cutIndex = 0;
   setReview(false);
+  showCutBadge();
+  if (state.mode === 4) selectBg(state.picks[0]);
   live.resume();
 }
 
@@ -538,7 +663,11 @@ async function finish() {
     const res = await api(`/api/shots/${state.shotId}/final`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: $('#msgInput').value, filter: state.useFilter }),
+      body: JSON.stringify({
+        message: $('#msgInput').value,
+        filter: state.useFilter,
+        cuts: state.cuts.slice(1).map((c) => c.id),  // 네 컷이면 나머지 세 장
+      }),
     });
     await loadImage(res.final);
     enterTake(res);
@@ -597,6 +726,18 @@ function bind() {
   $('#homeBtn').addEventListener('click', goHome);
   $('#shutterBtn').addEventListener('click', shoot);
   $('#retakeBtn').addEventListener('click', retake);
+  document.querySelectorAll('#modeSwitch button').forEach((b) => {
+    b.addEventListener('click', () => setMode(Number(b.dataset.mode)));
+  });
+  $('#randomBtn').addEventListener('click', () => {
+    const pool = state.cfg.backgrounds.map((b) => b.id);
+    state.picks = [];
+    while (state.picks.length < 4 && pool.length) {
+      state.picks.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    }
+    syncPicks();
+    startShooting();
+  });
   $('#useShotBtn').addEventListener('click', enterWrite);
   $('#backToShotBtn').addEventListener('click', async () => {
     show('studio');
@@ -665,6 +806,7 @@ async function init() {
   const ai = state.cfg.ai || {};
   $('#aiHint').hidden = !ai.on;
   $('#aiNotice').hidden = !ai.external;
+  setMode(1);
   startSlides();
 }
 

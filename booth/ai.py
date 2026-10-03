@@ -173,11 +173,14 @@ def status(sid):
     out = {'state': 'ready', 'photo': f'/media/{sid}/ai.jpg'}
     if storage.path(sid, 'aifinal').exists():
         out['final'] = f'/media/{sid}/aifinal.jpg'
+    elif rec.get('cuts'):
+        return {'state': 'pending'}  # 4컷은 네 장을 다 합치기 전까지는 보여 주지 않는다
     return out
 
 
-def note_final(sid, message):
-    """방문객이 한마디를 적어 완성했을 때. AI 버전도 같은 프레임·같은 한마디로 만들어 둔다."""
+def note_final(sid, message, cuts=()):
+    """방문객이 한마디를 적어 완성했을 때. AI 버전도 같은 프레임·같은 한마디로 만들어 둔다.
+    4컷이면 cuts에 나머지 세 장의 id가 온다. 네 장이 다 돼야 AI 4컷을 합친다."""
     if _engine is None:
         return
     with _lock:
@@ -185,19 +188,47 @@ def note_final(sid, message):
         if rec is None:
             return
         rec['message'] = message
-        ready = rec.get('state') == 'ready'
-    if ready:
-        _render_frame(sid, message)
+        rec['cuts'] = list(cuts)
+        for c in cuts:  # 어느 컷이 끝나든 대표 사진을 찾아갈 수 있도록
+            member = _states.get(c)
+            if member is not None:
+                member['lead'] = sid
+    _finish_ready(sid)
 
 
-def _render_frame(sid, message):
-    shot = storage.path(sid, 'ai')
-    if not shot.exists():
+def _finish_ready(sid):
+    """한 장이 끝날 때마다 본다. 1컷이면 바로, 4컷이면 네 장이 다 됐을 때 프레임을 만든다."""
+    with _lock:
+        rec = _states.get(sid) or {}
+        lead = rec.get('lead', sid)
+        lrec = _states.get(lead) or {}
+        message = lrec.get('message')
+        members = [lead] + list(lrec.get('cuts') or [])
+        if message is None or lrec.get('framed'):
+            return  # 아직 '완성하기' 전이거나 이미 만들었다
+        states = [(_states.get(m) or {}).get('state') for m in members]
+        if 'failed' in states:
+            lrec['state'] = 'failed'  # 한 컷이라도 실패하면 AI 4컷은 포기한다
+            return
+        if not all(s == 'ready' for s in states):
+            return
+        lrec['framed'] = True
+    _render_group(lead, members, message)
+
+
+def _render_group(lead, members, message):
+    paths = [storage.path(m, 'ai') for m in members]
+    if not all(p.exists() for p in paths):
         return
     try:
-        frame.render(shot, message, storage.path(sid, 'aifinal'))
+        frame.render(paths if len(paths) > 1 else paths[0], message, storage.path(lead, 'aifinal'))
+        if len(paths) > 1:
+            # 프레임 없는 AI 4컷을 대표 사진 자리에 합쳐 두고, 낱장은 지운다
+            frame.save_grid(paths, storage.path(lead, 'ai'))
+            for p in paths[1:]:
+                p.unlink(missing_ok=True)
     except Exception as e:
-        print(f'[AI] 프레임 실패 {sid}: {e}', flush=True)
+        print(f'[AI] 프레임 실패 {lead}: {e}', flush=True)
 
 
 # ---------- 빛만 옮기기 ----------
@@ -272,10 +303,8 @@ def _run(job):
         rec = _states.get(sid) or {}
         rec['state'] = 'ready'
         _states[sid] = rec
-        message = rec.get('message')
     print(f'[AI] 완료 {sid} ({_engine}, {time.time() - t0:.1f}초)', flush=True)
-    if message is not None:  # 이미 완성 화면까지 간 사진이면 프레임 버전도 바로 만든다
-        _render_frame(sid, message)
+    _finish_ready(sid)  # 이미 완성 화면까지 간 사진이면 프레임 버전도 바로 만든다
 
 
 # ---------- 엔진 ----------

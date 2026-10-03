@@ -25,13 +25,14 @@ def note_shot(sid, bg_id):
             _bg.popitem(last=False)
 
 
-def add(sid, message, filtered):
-    """'완성하기'를 누른 사진 한 장을 적는다."""
+def add(sid, message, filtered, cuts=1):
+    """'완성하기'를 누른 사진 한 장을 적는다. cuts는 1컷이면 1, 인생네컷이면 4."""
     with _lock:
         bg = _bg.pop(sid, None)
         b = config.BG_BY_ID.get(bg, {})
         rec = {'id': sid, 't': int(time.time()), 'bg': bg, 'place': b.get('place', ''),
-               'name': b.get('name', ''), 'msg': message or '', 'filter': bool(filtered)}
+               'name': b.get('name', ''), 'msg': message or '', 'filter': bool(filtered),
+               'cuts': int(cuts)}
         try:
             with open(PATH, 'a', encoding='utf-8') as f:
                 f.write(json.dumps(rec, ensure_ascii=False) + '\n')

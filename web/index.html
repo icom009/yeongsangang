@@ -47,7 +47,12 @@
 <section class="screen places" data-screen="places" hidden>
   <div class="places-head">
     <h1 class="places-title">어디에 서 볼까요?</h1>
-    <p class="places-hint">사진을 누르면 그 장소가 펼쳐져요</p>
+    <p class="places-hint" id="placesHint">사진을 누르면 그 장소가 펼쳐져요</p>
+    <div class="mode" id="modeSwitch" role="group" aria-label="촬영 방식">
+      <button type="button" data-mode="1" aria-pressed="true">한 컷</button>
+      <button type="button" data-mode="4" aria-pressed="false">네 컷</button>
+    </div>
+    <button class="btn btn-glass btn-sm places-random" id="randomBtn" type="button" hidden>아무 곳이나 네 곳</button>
   </div>
   <div class="deck" id="placeGrid" role="listbox" aria-label="영산강의 장소"></div>
 </section>
@@ -60,6 +65,7 @@
       <img id="resultImg" class="stage-result" alt="합성된 사진" hidden>
       <div class="stage-hint" id="stageHint">카메라를 준비하고 있어요</div>
       <div class="stage-caption" id="stageCaption" aria-hidden="true"><span id="capTag"></span><strong id="capName"></strong></div>
+      <div class="cut-badge" id="cutBadge" hidden></div>
       <button class="stage-arrow prev" id="prevPlace" type="button" aria-label="이전 장소">‹</button>
       <button class="stage-arrow next" id="nextPlace" type="button" aria-label="다음 장소">›</button>
       <div class="countdown" id="countdown" aria-live="assertive"></div>

@@ -216,20 +216,35 @@ async def create_shot(photo: UploadFile = File(...), bg: int = Form(...)):
 class FinalBody(BaseModel):
     message: str = Field('', max_length=80)
     filter: bool = True
+    cuts: list[str] = Field(default_factory=list)  # 인생네컷이면 나머지 세 장의 id
 
 
 @app.post('/api/shots/{sid}/final')
 async def finalize(sid: str, body: FinalBody, request: Request):
+    """1컷이면 사진 한 장, 인생네컷이면 cuts에 온 세 장까지 같은 프레임에 담는다."""
     shot = _need(sid, 'shot')
-    plain = storage.path(sid, 'plain')
-    if not body.filter and plain.exists():  # 재시도로 이미 정리된 뒤면 그대로 둔다
-        # 원본을 고르면 그 사진을 shot 자리에 둔다 (휴대폰 받기 화면의 '프레임 없는 사진'도 같은 사진이 되도록)
-        await asyncio.to_thread(shutil.copyfile, plain, shot)
-    await asyncio.to_thread(frame.render, shot, body.message, storage.path(sid, 'final'))
-    # 고르지 않은 쪽 사진은 더 쓸 일이 없으니 바로 지운다 (용량·개인정보)
-    plain.unlink(missing_ok=True)
-    ai.note_final(sid, body.message)  # AI 버전도 같은 한마디로 프레임에 담는다
-    records.add(sid, body.message, body.filter)  # 관리 화면 이력
+    done = storage.path(sid, 'final')
+    if not done.exists():  # 두 번 눌러도 다시 만들지 않는다
+        cut_ids = body.cuts[:3]
+        paths = [shot] + [_need(c, 'shot') for c in cut_ids]
+        ids = [sid] + cut_ids
+        if not body.filter:
+            # 원본을 고르면 그 사진을 shot 자리에 둔다 (받기 화면의 '프레임 없는 사진'도 같아지도록)
+            for i, p in zip(ids, paths):
+                plain = storage.path(i, 'plain')
+                if plain.exists():  # 재시도로 이미 정리된 뒤면 그대로 둔다
+                    await asyncio.to_thread(shutil.copyfile, plain, p)
+        await asyncio.to_thread(frame.render, paths if len(paths) > 1 else shot, body.message, done)
+        if len(paths) > 1:
+            # 프레임 없는 4컷도 대표 사진 자리에 합쳐 둔다
+            await asyncio.to_thread(frame.save_grid, paths, shot)
+        # 고르지 않은 쪽 사진과 합쳐진 낱장은 더 쓸 일이 없으니 바로 지운다 (용량·개인정보)
+        for i in ids:
+            storage.path(i, 'plain').unlink(missing_ok=True)
+        for i in ids[1:]:
+            storage.path(i, 'shot').unlink(missing_ok=True)
+        ai.note_final(sid, body.message, cut_ids)  # AI 버전도 같은 한마디로 프레임에 담는다
+        records.add(sid, body.message, body.filter, len(paths))  # 관리 화면 이력
     return {
         'id': sid,
         'final': f'/media/{sid}/final.jpg',

@@ -116,9 +116,10 @@ def matte(bgr):
     a = a[0, 0]
     # 배경의 옅은 잡음은 지우고, 몸 안쪽의 반투명은 채운다
     a = np.clip((a - 0.03) / 0.94, 0, 1).astype(np.float32)
+    gaps = open_gaps(a)  # 브이 자세의 손과 얼굴 사이처럼 '진짜 뚫린' 곳은 메우지 않는다
     if _segment is not None:
-        a = _merge_body(a, _body_mask(bgr))
-    return solidify(a)
+        a = _merge_body(a, _body_mask(bgr), gaps)
+    return solidify(a, gaps)
 
 
 def _body_mask(bgr):
@@ -131,29 +132,62 @@ def _body_mask(bgr):
     return cv2.resize(1 / (1 + np.exp(-o)), (w, h), interpolation=cv2.INTER_LINEAR).astype(np.float32)
 
 
-def _merge_body(a, body):
-    """머리카락 디테일은 RVM, 몸통은 BiRefNet. 윤곽에서 멀리 떨어진 RVM 오검출(배경 얼룩)은 지운다."""
+def _merge_body(a, body, gaps=None):
+    """머리카락 디테일은 RVM, 몸통은 BiRefNet. 윤곽에서 멀리 떨어진 RVM 오검출(배경 얼룩)은 지운다.
+    gaps(진짜 뚫린 곳)는 BiRefNet이 메워 버렸더라도 다시 뚫어 둔다."""
     s = max(a.shape) / 1600
     core = cv2.erode(body, np.ones((int(7 * s) | 1,) * 2, np.uint8))
     core = _smoothstep(0.5, 0.9, cv2.GaussianBlur(core, (0, 0), 1.5 * s))
+    if gaps is not None:
+        core = core * (1 - gaps)
     near = cv2.GaussianBlur(cv2.dilate((body > 0.3).astype(np.uint8), np.ones((int(61 * s) | 1,) * 2, np.uint8))
                             .astype(np.float32), (0, 0), 10 * s)
     return np.maximum(a * near, core).astype(np.float32)
 
 
-def solidify(a):
-    """몸 안쪽의 구멍·점박이 반투명(옷이 배경과 비슷한 색일 때 생긴다)을 메운다.
-    주변이 대부분 인물인 곳만 채우므로, 바깥으로 뻗은 머리카락 끝의 반투명은 그대로 남는다."""
-    s = max(a.shape) / 1600
+def _enclosed(a):
+    """인물에 완전히 둘러싸인 구멍들의 라벨 지도와 넓이."""
     solid = (a > 0.5).astype(np.uint8)
-    # 바깥과 이어지지 않은(완전히 둘러싸인) 구멍
-    h, w = a.shape
     flood = np.pad(1 - solid, 1, constant_values=1)
     cv2.floodFill(flood, None, (0, 0), 2)
-    holes = (flood[1:-1, 1:-1] == 1).astype(np.float32)
+    holes = (flood[1:-1, 1:-1] == 1).astype(np.uint8)
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(holes, 8)
+    return holes, lab, stats, n, int(solid.sum())
+
+
+def open_gaps(a):
+    """브이 자세의 손과 얼굴 사이, 허리에 손을 얹었을 때 팔 안쪽처럼 '진짜 뚫려서 배경이 보여야 하는 곳'.
+    옷 색이 배경과 비슷해 생기는 점박이 구멍과 달리 넓다. 이런 곳은 메우지 않고 남겨야 한다."""
+    s = max(a.shape) / 1600
+    holes, lab, stats, n, body = _enclosed(a)
+    if n <= 1 or body == 0:
+        return np.zeros_like(a)
+    limit = max(64.0, body * 0.004)  # 몸 넓이의 0.4%보다 크면 진짜 구멍으로 본다
+    big = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] > limit]
+    if not big:
+        return np.zeros_like(a)
+    g = np.isin(lab, big).astype(np.float32)
+    g = cv2.erode(g, np.ones((max(3, int(3 * s)) | 1,) * 2, np.uint8))  # 경계는 매팅 값을 그대로 쓴다
+    return cv2.GaussianBlur(g, (0, 0), 1.5 * s).astype(np.float32)
+
+
+def solidify(a, gaps=None):
+    """몸 안쪽의 작은 구멍·점박이 반투명(옷이 배경과 비슷한 색일 때 생긴다)을 메운다.
+    주변이 대부분 인물인 곳만 채우므로, 바깥으로 뻗은 머리카락 끝의 반투명은 그대로 남는다.
+    넓게 뚫린 곳(손가락 사이 등)은 open_gaps로 걸러 두어 메우지 않는다."""
+    s = max(a.shape) / 1600
+    if gaps is None:
+        gaps = open_gaps(a)
+    holes, lab, stats, n, body = _enclosed(a)
+    small = np.zeros_like(a)
+    if n > 1 and body:
+        limit = max(64.0, body * 0.004)
+        keep = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] <= limit]
+        if keep:
+            small = np.isin(lab, keep).astype(np.float32)
     # 주변의 85% 이상이 인물인 곳 (몸 안쪽)
     inside = _smoothstep(0.82, 0.95, cv2.GaussianBlur(a, (0, 0), 8 * s))
-    fill = np.maximum(cv2.GaussianBlur(holes, (0, 0), 1.5 * s), inside)
+    fill = np.maximum(cv2.GaussianBlur(small, (0, 0), 1.5 * s), inside) * (1 - gaps)
     return np.maximum(a, fill).astype(np.float32)
 
 
