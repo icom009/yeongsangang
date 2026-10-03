@@ -12,11 +12,11 @@ from urllib.parse import urlsplit
 import cv2
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from booth import compose, config, frame, storage
+from booth import ai, compose, config, frame, storage
 
 # 실시간 미리보기 모듈(.mjs)·wasm을 브라우저가 받아들이도록 형식을 명시 (OS마다 기본값이 다르다)
 mimetypes.add_type('text/javascript', '.mjs')
@@ -38,9 +38,11 @@ async def _cleanup_loop():
 async def lifespan(_):
     # 모델은 첫 촬영 전에 미리 올려 둔다 (첫 손님이 기다리지 않도록)
     await asyncio.to_thread(compose.warmup)
-    task = asyncio.create_task(_cleanup_loop())
+    # AI 빛 보정은 있으면 쓰고 없으면 그냥 끈다 (촬영 흐름과 무관하게 뒤에서 돈다)
+    tasks = [asyncio.create_task(_cleanup_loop()), *await ai.start()]
     yield
-    task.cancel()
+    for task in tasks:
+        task.cancel()
 
 
 app = FastAPI(title='영산강 AI 포토부스', lifespan=lifespan, docs_url=None, redoc_url=None)
@@ -133,6 +135,7 @@ def get_config():
             'color': config.TEXT_COLOR,
         },
         'defaultMessage': config.DEFAULT_MESSAGE,
+        'ai': ai.info(),
     }
 
 
@@ -185,11 +188,12 @@ async def create_shot(photo: UploadFile = File(...), bg: int = Form(...)):
         raise HTTPException(400, '사진을 읽지 못했어요. 다시 찍어 주세요.')
 
     async with _compose_gate:
-        styled, plain, person = await asyncio.to_thread(compose.compose, img, bg)
+        styled, plain, person, alpha = await asyncio.to_thread(compose.compose, img, bg)
     sid = storage.new_id()
     q = [cv2.IMWRITE_JPEG_QUALITY, 93]
     cv2.imwrite(str(storage.path(sid, 'shot')), styled, q)
     cv2.imwrite(str(storage.path(sid, 'plain')), plain, q)
+    ai.submit(sid, plain, alpha, bg)  # AI 버전은 뒤에서 만든다 (여기서 기다리지 않는다)
     return {
         'id': sid,
         'shot': f'/media/{sid}/shot.jpg',
@@ -214,6 +218,7 @@ async def finalize(sid: str, body: FinalBody, request: Request):
     await asyncio.to_thread(frame.render, shot, body.message, storage.path(sid, 'final'))
     # 고르지 않은 쪽 사진은 더 쓸 일이 없으니 바로 지운다 (용량·개인정보)
     plain.unlink(missing_ok=True)
+    ai.note_final(sid, body.message)  # AI 버전도 같은 한마디로 프레임에 담는다
     return {
         'id': sid,
         'final': f'/media/{sid}/final.jpg',
@@ -227,7 +232,8 @@ def media(sid: str, kind: str, download: int = 0):
     p = _need(sid, kind)
     headers = dict(LONG_CACHE)
     if download:
-        name = 'yeongsangang_frame.jpg' if kind == 'final' else 'yeongsangang_photo.jpg'
+        name = {'final': 'yeongsangang_frame.jpg', 'aifinal': 'yeongsangang_ai_frame.jpg',
+                'ai': 'yeongsangang_ai.jpg'}.get(kind, 'yeongsangang_photo.jpg')
         headers['Content-Disposition'] = f'attachment; filename="{name}"'
     return FileResponse(p, media_type=JPEG, headers=headers)
 
@@ -236,6 +242,14 @@ def media(sid: str, kind: str, download: int = 0):
 def qr(sid: str, request: Request):
     _need(sid, 'final')
     return Response(frame.qr_png(f'{base_url(request)}/p/{sid}'), media_type='image/png')
+
+
+@app.get('/p/{sid}/ai')
+def photo_ai(sid: str):
+    """AI 빛 보정 버전이 준비됐는지. 휴대폰 받기 화면이 물어본다 (인터넷에서도 열리도록 /p/ 아래에 둔다)."""
+    if not storage.valid_id(sid):
+        raise HTTPException(404)
+    return JSONResponse(ai.status(sid), headers=NO_STORE)
 
 
 @app.get('/p/{sid}', response_class=HTMLResponse)

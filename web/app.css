@@ -155,6 +155,7 @@ img { display: block; max-width: 100%; }
   color: var(--sail-hi); text-shadow: 0 2px 20px rgba(0, 0, 0, .35);
 }
 .intro-lead { margin: 18px 0 38px; color: var(--text-dim); font-size: clamp(1.02rem, 1.5vw, 1.22rem); line-height: 1.7; }
+.intro-notice { margin: 16px 0 0; color: var(--text-dim); font-size: .92rem; opacity: .8; }
 .intro-error { margin: 18px 0 0; max-width: 34em; color: #ffd4cf; }
 .intro-caption {
   position: absolute; z-index: 1; right: var(--gutter); bottom: calc(var(--gutter) * 2.4);
@@ -557,6 +558,7 @@ img { display: block; max-width: 100%; }
 }
 .qr.on .qr-wait { display: none; }
 .take-lead { margin: 20px 0 28px; color: var(--text-dim); line-height: 1.7; }
+#aiHint { margin-top: -14px; font-size: .95rem; opacity: .85; }
 .take-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .take-idle { margin: 18px 0 0; color: var(--text-faint); font-size: .88rem; min-height: 1.4em; }
 

@@ -11,7 +11,8 @@ from . import config
 from .compose import foreground_mask, read_image
 
 _ID = re.compile(r'^[A-Za-z0-9_-]{10,32}$')
-KINDS = ('shot', 'plain', 'final')  # shot: 장소 빛 필터 적용, plain: 필터 없는 합성
+# shot: 장소 빛 필터 적용, plain: 필터 없는 합성, ai: AI 빛 보정 버전, aifinal: 그 프레임 사진
+KINDS = ('shot', 'plain', 'final', 'ai', 'aifinal')
 
 
 def new_id():

@@ -63,6 +63,20 @@ docker compose --profile web up -d --build
 
 `docker-compose.gpu.yml`을 덧붙이면 `onnxruntime-gpu`와 `resnet50` 매팅 모델로 빌드하고 GPU를 붙입니다. `.env`에 `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`을 넣어 두면 `-f` 없이 그대로 쓸 수 있습니다. GPU가 없는 현장 노트북은 이 파일 없이 CPU 이미지를 씁니다.
 
+**생성형 AI 빛 보정 (선택)**
+
+빠른 합성을 먼저 내보낸 뒤, 뒤에서 'AI 버전'을 한 장 더 만들어 방문객 휴대폰 화면에 덧붙입니다. 촬영·QR 흐름은 이것을 절대 기다리지 않고, 실패하거나 느리면 없는 셈 칩니다.
+
+```bash
+# 집 GPU 서버: IC-Light 컨테이너를 함께 띄운다 (.env의 COMPOSE_FILE에 더해 두어도 됩니다)
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.ai.yml --profile web up -d --build
+```
+
+- **엔진은 환경에 따라 자동으로 고릅니다**(`YS_AI=auto`): 로컬 IC-Light 서비스가 응답하면 그것, 아니면 `YS_AI_KEY`가 있을 때 외부 API, 둘 다 없으면 끕니다. 현장 노트북(플랜 B)은 그냥 꺼진 채로 돌아갑니다.
+- **얼굴은 바뀌지 않습니다.** AI 결과에서 밝기·색 '비율'만 뽑아 인물에 곱하므로(`booth/ai.py`의 `apply_light`) 얼굴 생김새와 디테일은 원본 그대로입니다. 배경은 인물 주변에 생긴 그림자만 받고 풍경은 그대로 둡니다.
+- **IC-Light 컨테이너**는 처음 켤 때 모델 약 6GB를 내려받습니다(`ai_cache` 볼륨). 준비되기 전에는 `/health`가 503이라 부스는 AI 없이 돌다가, 준비되면 저절로 붙습니다.
+- **외부 API**를 쓰면 얼굴 사진이 바깥 서버로 나가므로 처음 화면에 안내 문구가 자동으로 뜹니다.
+
 **플랜 B: 현장 노트북 + 공유기 (인터넷 없이)**
 
 ```bash
@@ -78,7 +92,7 @@ docker compose --env-file .env.local up -d        # 부스 화면: http://localh
 - **부스 → 서버:** 촬영 원본 JPEG을 `POST /api/shots`로 보냅니다.
 - **서버 → 방문객:** `/p/<ID>` 화면에서 받습니다.
 - **접근 제한:** 공개 주소로 들어온 요청은 `/p/`, `/media/`, `/static/`, `/font/`만 열고 나머지는 부스 키가 있어야 합니다(`main.py`의 `guard_public`).
-- **저장:** `output/`에 `<ID>_shot.jpg`(고른 사진)와 `<ID>_final.jpg`(프레임 사진)가 남고, 고르지 않은 쪽은 완성 직후 지웁니다.
+- **저장:** `output/`에 `<ID>_shot.jpg`(고른 사진)와 `<ID>_final.jpg`(프레임 사진)가 남고, 고르지 않은 쪽은 완성 직후 지웁니다. AI 빛 보정을 켜면 `<ID>_ai.jpg`·`<ID>_aifinal.jpg`도 함께 남습니다.
 - **보관:** `YS_KEEP_HOURS`(compose 기본 7일)가 지나면 자동으로 지웁니다.
 - **ID:** 추측할 수 없는 무작위 16자이고 목록 보기 기능은 없습니다.
 - **용량:** 방문객 한 명당 약 1.5MB입니다.
@@ -105,6 +119,12 @@ docker compose --env-file .env.local up -d        # 부스 화면: http://localh
 | `YS_SEGMENT_MODEL` | 없음 | `birefnet`이면 몸통 윤곽을 BiRefNet으로 보강합니다(어깨가 반투명하게 비는 문제). GPU에서만 켜집니다 |
 | `YS_BEAUTY` | 1 | 장소 빛 필터·인물 보정 세기. `0`이면 끄고, 더 진하게는 `1.3` 정도 |
 | `YS_OUT_DIR` | `output/` | 사진 저장 위치 |
+| `YS_AI` | auto | 생성형 AI 빛 보정. `auto`면 로컬 IC-Light → 외부 API 키 → 끔 순으로 자동, `off`면 끔, `local`·`api`는 고정 |
+| `YS_AI_URL` | `http://ic-light:8000` | 로컬 IC-Light 서비스 주소 |
+| `YS_AI_KEY` | 없음 | 외부 이미지 편집 API 키 (넣으면 얼굴 사진이 바깥으로 나가고, 부스에 안내 문구가 뜹니다) |
+| `YS_AI_API_MODEL` | gemini-3.1-flash-image | 외부 엔진 모델 이름 |
+| `YS_AI_SIZE` | 1024 | AI에 넣는 사진 크기(긴 변) |
+| `YS_AI_QUEUE` | 3 | AI 대기줄 길이. 넘치면 그 사진은 AI 버전 없이 넘어갑니다 |
 
 Render(`RENDER_EXTERNAL_URL`)와 Hugging Face Spaces(`SPACE_HOST`)에서는 외부 주소를 자동으로 잡습니다.
 
@@ -116,6 +136,8 @@ booth/compose.py   인물 매팅·합성
 booth/frame.py     프레임·문구 렌더링, QR코드
 booth/storage.py   사진 파일 관리, 자동 정리
 booth/config.py    배경 목록, 프레임 좌표, 설정
+booth/ai.py        생성형 AI 빛 보정 (선택, 뒤에서 돈다)
+services/ic-light/ IC-Light 재조명 서비스 (GPU 컨테이너, 선택)
 web/               화면 (index.html, app.js, live.js, sound.js, app.css, photo.html)
 ```
 

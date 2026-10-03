@@ -27,6 +27,9 @@ services:
       YS_OPEN: ${YS_OPEN:-}
       YS_KEEP_HOURS: ${YS_KEEP_HOURS:-168}
       YS_BEAUTY: ${YS_BEAUTY:-1}
+      # 생성형 AI 빛 보정: auto면 로컬 IC-Light(docker-compose.ai.yml) → 외부 API 키 → 끔
+      YS_AI: ${YS_AI:-auto}
+      YS_AI_KEY: ${YS_AI_KEY:-}
     volumes:
       - ./output:/app/output   # 사진은 컨테이너를 지워도 남도록 이 폴더에 저장
 

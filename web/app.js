@@ -661,6 +661,10 @@ async function init() {
     return;
   }
   buildPlaces();
+  // AI 빛 보정은 환경에 따라 켜진다. 외부 서비스를 쓰는 경우에는 처음 화면에 안내를 띄운다
+  const ai = state.cfg.ai || {};
+  $('#aiHint').hidden = !ai.on;
+  $('#aiNotice').hidden = !ai.external;
   startSlides();
 }
 

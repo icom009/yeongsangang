@@ -1,0 +1,30 @@
+# 생성형 AI 빛 보정(IC-Light) 덧붙임. 집 GPU 서버에서만 쓴다 (선택 기능).
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.ai.yml --profile web up -d --build
+# .env의 COMPOSE_FILE에 :docker-compose.ai.yml 을 더해 두면 -f 없이 그대로 쓸 수 있다.
+# 이 파일을 빼면 booth는 로컬 서비스를 못 찾아 AI 보정만 저절로 꺼진다 (촬영은 그대로).
+services:
+  booth:
+    environment:
+      YS_AI_URL: ${YS_AI_URL:-http://ic-light:8000}
+    depends_on:
+      - ic-light
+
+  ic-light:
+    build: ./services/ic-light
+    image: yeongsangang-ic-light
+    restart: unless-stopped
+    environment:
+      IC_STEPS: ${IC_STEPS:-20}
+      IC_CFG: ${IC_CFG:-2.0}
+    volumes:
+      - ai_cache:/cache     # 모델 약 6GB. 지우면 다시 내려받는다
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  ai_cache:

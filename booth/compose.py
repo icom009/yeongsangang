@@ -407,7 +407,8 @@ def _finish(F, a, bgf, fg=None):
 
 
 def compose(photo_bgr, bg_id, w=config.SHOT_W, h=config.SHOT_H):
-    """(필터 적용 사진, 원본 합성 사진, 사람을 찾았는지)를 함께 만든다. 매팅은 한 번만 한다.
+    """(필터 적용 사진, 원본 합성 사진, 사람을 찾았는지, 인물 알파)를 함께 만든다. 매팅은 한 번만 한다.
+    알파는 뒤에서 도는 AI 빛 보정(booth/ai.py)이 다시 매팅하지 않도록 함께 돌려준다.
     사람을 찾지 못해도(뒷모습·탈 인형·너무 먼 거리 등) 멈추지 않고 찍은 사진 그대로 돌려준다."""
     photo = cover(photo_bgr, w, h)
     bg = cover(read_image(config.BG_DIR / f'bg_{bg_id}.png'), w, h)
@@ -415,7 +416,7 @@ def compose(photo_bgr, bg_id, w=config.SHOT_W, h=config.SHOT_H):
 
     a = matte(photo)
     if float((a > 0.5).mean()) < 0.01:
-        return photo, photo, False
+        return photo, photo, False, None
     img = photo.astype(np.float32) / 255
     bgf = bg.astype(np.float32) / 255
 
@@ -429,4 +430,4 @@ def compose(photo_bgr, bg_id, w=config.SHOT_W, h=config.SHOT_H):
     S = beautify(S, a, k, look.get('glow', 0.16), look.get('tint', (0, 0))[1])
     S = rim_light(S, a, bgf, _sun_in_shot(bg_id, look, w, h), look.get('rim', 0.2) * k)
     S = light_wrap(S, a, bgf)
-    return _finish(S, a, bgf, fg), plain, True
+    return _finish(S, a, bgf, fg), plain, True, np.uint8(a * 255 + 0.5)

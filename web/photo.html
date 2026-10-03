@@ -31,6 +31,17 @@
     .photo-page .actions { display: grid; gap: 10px; }
     .photo-page .actions .btn { width: 100%; text-decoration: none; }
     .photo-page .tip { margin: 0; color: var(--text-dim); font-size: .9rem; text-align: center; }
+    .photo-page .ver { display: flex; gap: 8px; margin-bottom: 12px; }
+    .photo-page .ver button {
+      flex: 1; padding: 10px 8px; border-radius: 999px; cursor: pointer;
+      border: 1px solid rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .06);
+      color: var(--text-dim); font: inherit; font-size: .92rem; font-weight: 600;
+    }
+    .photo-page .ver button[aria-pressed="true"] {
+      background: var(--sail-hi); border-color: transparent; color: #11242a;
+    }
+    .photo-page .ver .tag { font-size: .72rem; opacity: .85; margin-left: 4px; }
+    .photo-page .ai-note { margin: 10px 0 0; color: var(--text-dim); font-size: .85rem; text-align: center; }
     .photo-page .missing { padding: 40px 0; }
     .photo-page .missing p { color: var(--text-dim); }
   </style>
@@ -44,7 +55,12 @@
   </header>
 
   <div id="ready" hidden>
+    <div class="ver" id="ver" hidden role="group" aria-label="사진 고르기">
+      <button type="button" data-ver="base" aria-pressed="true">기본</button>
+      <button type="button" data-ver="ai" aria-pressed="false">AI 빛 보정<span class="tag">NEW</span></button>
+    </div>
     <img class="shot" id="shot" alt="포토부스에서 찍은 사진">
+    <p class="ai-note" id="aiNote" hidden></p>
     <div class="actions" style="margin-top:18px">
       <button class="btn btn-sail btn-lg" id="shareBtn" type="button" hidden>사진 저장·공유하기</button>
       <a class="btn btn-sail btn-lg" id="saveFinal" download>프레임 사진 저장하기</a>
@@ -64,28 +80,75 @@
     document.getElementById('missing').hidden = false;
     document.getElementById('title').textContent = '사진이 없어요';
   } else {
-    const final = `/media/${sid}/final.jpg`;
-    document.getElementById('ready').hidden = false;
-    document.getElementById('shot').src = final;
+    const shot = document.getElementById('shot');
+    const saveFinal = document.getElementById('saveFinal');
+    const saveShot = document.getElementById('saveShot');
+    const share = document.getElementById('shareBtn');
+    const note = document.getElementById('aiNote');
     const amb = document.querySelector('#ambient img');
+    // base: 부스에서 고른 사진, ai: 뒤에서 만들어진 AI 빛 보정 버전
+    const urls = { base: { final: `/media/${sid}/final.jpg`, photo: `/media/${sid}/shot.jpg` } };
+    let cur = 'base';
+    let shareFile = null;
+
+    document.getElementById('ready').hidden = false;
     amb.onload = () => amb.classList.add('on');
-    amb.src = final; // 내 사진의 빛이 화면 전체에 번지게
-    document.getElementById('saveFinal').href = `${final}?download=1`;
-    document.getElementById('saveShot').href = `/media/${sid}/shot.jpg?download=1`;
+
+    function setVersion(v) {
+      if (!urls[v]) return;
+      cur = v;
+      const u = urls[v];
+      shot.src = u.final;
+      amb.src = u.final;             // 내 사진의 빛이 화면 전체에 번지게
+      saveFinal.href = `${u.final}?download=1`;
+      saveShot.href = `${u.photo}?download=1`;
+      note.hidden = v !== 'ai';
+      document.querySelectorAll('#ver button').forEach((b) => {
+        b.setAttribute('aria-pressed', String(b.dataset.ver === v));
+      });
+      prepareShare(u.final);
+    }
 
     // 휴대폰에서는 공유 시트로 바로 사진 앱에 저장하거나 메신저로 보낼 수 있다
-    const share = document.getElementById('shareBtn');
-    if (navigator.canShare) {
-      fetch(final).then((r) => r.blob()).then((blob) => {
+    function prepareShare(url) {
+      if (!navigator.canShare) return;
+      shareFile = null;
+      fetch(url).then((r) => r.blob()).then((blob) => {
         const file = new File([blob], 'yeongsangang.jpg', { type: 'image/jpeg' });
         if (!navigator.canShare({ files: [file] })) return;
+        shareFile = file;
         share.hidden = false;
-        document.getElementById('saveFinal').className = 'btn btn-glass';
-        share.addEventListener('click', () => {
-          navigator.share({ files: [file], title: '영산강 포토부스' }).catch(() => {});
-        });
+        saveFinal.className = 'btn btn-glass';
       }).catch(() => {});
     }
+    share.addEventListener('click', () => {
+      if (shareFile) navigator.share({ files: [shareFile], title: '영산강 포토부스' }).catch(() => {});
+    });
+    document.querySelectorAll('#ver button').forEach((b) => {
+      b.addEventListener('click', () => setVersion(b.dataset.ver));
+    });
+    setVersion('base');
+
+    // AI 빛 보정 버전은 부스에서 사진을 받은 뒤에도 뒤에서 만들어진다. 준비되면 고르기 단추가 생긴다
+    let tries = 0;
+    async function pollAi() {
+      if (tries++ > 40) return;                       // 2분쯤 기다리고 그만둔다
+      let res;
+      try {
+        res = await (await fetch(`/p/${sid}/ai`, { cache: 'no-store' })).json();
+      } catch { return setTimeout(pollAi, 5000); }
+      if (res.state === 'pending') {
+        note.textContent = 'AI 빛 보정 버전을 만들고 있어요. 잠시만요…';
+        note.hidden = false;
+        return setTimeout(pollAi, 3000);
+      }
+      if (res.state !== 'ready') return;              // off·failed면 조용히 둔다
+      urls.ai = { final: res.final || res.photo, photo: res.photo };
+      note.textContent = 'AI가 그곳의 빛에 맞춰 다시 비춘 사진이에요. 얼굴은 그대로예요.';
+      note.hidden = cur !== 'ai';
+      document.getElementById('ver').hidden = false;
+    }
+    pollAi();
   }
 </script>
 </body>
