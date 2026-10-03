@@ -257,7 +257,7 @@
         <div class="place">${esc(it.place || '장소 미상')}</div>
         <div class="msg">${esc(it.msg || '')}</div>
         <div class="tags">
-          <span class="tag">${it.filter ? '빛 필터' : '원본'}</span>
+          ${it.filter === null ? '<span class="tag">기록 없음</span>' : `<span class="tag">${it.filter ? '빛 필터' : '원본'}</span>`}
           ${it.ai ? '<span class="tag ai">AI 빛 보정</span>' : ''}
           <span class="tag">${it.id}</span>
         </div>

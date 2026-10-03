@@ -326,7 +326,7 @@ def manage_status(request: Request):
 @app.get('/api/manage/shots')
 def manage_shots(request: Request, offset: int = 0, limit: int = 40, q: str = ''):
     _need_manage(request)
-    rows = records.load()
+    rows = records.with_orphans()
     key = q.strip()
     if key:
         rows = [r for r in rows

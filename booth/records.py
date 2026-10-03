@@ -95,13 +95,30 @@ def prune(before):
         return len(rows) - len(keep)
 
 
+def with_orphans():
+    """기록에 없는데 사진만 남아 있는 것(이 기능을 넣기 전에 찍은 사진)도 함께 보여 준다.
+    관리 화면에서 지울 수 있어야 하므로 빠뜨리지 않는다."""
+    rows = load()
+    known = {r.get('id') for r in rows}
+    tail = '_final.jpg'
+    for p in config.OUT_DIR.glob('*' + tail):
+        sid = p.name[:-len(tail)]
+        if sid in known:
+            continue
+        rows.append({'id': sid, 't': int(p.stat().st_mtime), 'bg': None, 'place': '',
+                     'name': '', 'msg': '', 'filter': None, 'orphan': True})
+    rows.sort(key=lambda r: r.get('t', 0), reverse=True)
+    return rows
+
+
 def stats():
     """관리 화면 위쪽 요약: 전체·오늘·장소별."""
-    rows = load()
+    rows = with_orphans()
     day = time.time() - 86400
     places = {}
     for r in rows:
-        places[r.get('place') or '알 수 없음'] = places.get(r.get('place') or '알 수 없음', 0) + 1
+        key = r.get('place') or '장소 미상'
+        places[key] = places.get(key, 0) + 1
     return {
         'total': len(rows),
         'today': sum(1 for r in rows if r.get('t', 0) >= day),
