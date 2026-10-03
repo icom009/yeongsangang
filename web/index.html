@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f2a2f">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛵</text></svg>">
+  <title>영산강 포토부스</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hahmlet:wght@500;700;800&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<!-- 시작 -->
+<section class="screen intro" data-screen="intro">
+  <div class="intro-slides" aria-hidden="true"></div>
+  <div class="intro-body">
+    <p class="intro-place">2026 나주영산강축제</p>
+    <h1 class="intro-title">영산강 풍경 속에<br>들어가 한 장</h1>
+    <p class="intro-lead">배경을 고르면 화면 속 우리가 바로 그곳에 서 있어요.<br>찍은 사진은 QR로 휴대폰에 담아 가세요.</p>
+    <button class="btn btn-sail btn-xl" id="startBtn" type="button">카메라 켜고 시작하기</button>
+    <p class="intro-error" id="introError" role="alert" hidden></p>
+  </div>
+</section>
+
+<!-- 공통 머리글 -->
+<header class="topbar" id="topbar" hidden>
+  <button class="brand" type="button" id="homeBtn" aria-label="처음 화면으로">영산강 포토부스</button>
+  <ol class="steps" aria-label="진행 단계">
+    <li data-step="shoot"><span>1</span>배경 고르고 찍기</li>
+    <li data-step="write"><span>2</span>한마디 남기기</li>
+    <li data-step="take"><span>3</span>사진 받기</li>
+  </ol>
+</header>
+
+<!-- 촬영 -->
+<section class="screen studio" data-screen="studio" hidden>
+  <div class="stage-wrap">
+    <div class="stage" id="stage">
+      <canvas id="stageCanvas" width="1280" height="960" aria-label="실시간 합성 미리보기"></canvas>
+      <img id="resultImg" class="stage-result" alt="합성된 사진" hidden>
+      <div class="stage-hint" id="stageHint">카메라를 준비하고 있어요</div>
+      <div class="countdown" id="countdown" aria-live="assertive"></div>
+      <div class="busy" id="busy" hidden>
+        <div class="busy-bar"></div>
+        <p>풍경 속에 자연스럽게 담는 중이에요</p>
+      </div>
+      <div class="flash" id="flash"></div>
+    </div>
+    <p class="stage-note" id="stageNote" hidden></p>
+  </div>
+
+  <aside class="panel">
+    <div class="scene" id="sceneInfo">
+      <p class="scene-index" id="sceneIndex"></p>
+      <h2 class="scene-name" id="sceneName"></h2>
+      <p class="scene-note" id="sceneNote"></p>
+    </div>
+
+    <div class="controls" id="shootControls">
+      <div class="timer" role="radiogroup" aria-label="촬영 타이머">
+        <span class="timer-label">타이머</span>
+        <button type="button" role="radio" data-sec="3" aria-checked="true">3초</button>
+        <button type="button" role="radio" data-sec="5" aria-checked="false">5초</button>
+        <button type="button" role="radio" data-sec="10" aria-checked="false">10초</button>
+      </div>
+      <button class="shutter" id="shutterBtn" type="button">
+        <span class="shutter-ring"></span><span class="shutter-text">찍기</span>
+      </button>
+      <button class="btn btn-ghost btn-sm" id="switchCamBtn" type="button" hidden>카메라 바꾸기</button>
+    </div>
+
+    <div class="controls" id="reviewControls" hidden>
+      <p class="review-q">이 사진으로 할까요?</p>
+      <button class="btn btn-sail btn-lg" id="useShotBtn" type="button">이 사진으로 꾸미기</button>
+      <button class="btn btn-ghost" id="retakeBtn" type="button">다시 찍기</button>
+    </div>
+  </aside>
+
+  <div class="filmstrip" id="filmstrip" role="listbox" aria-label="배경 고르기"></div>
+</section>
+
+<!-- 꾸미기 -->
+<section class="screen write" data-screen="write" hidden>
+  <div class="card-preview" id="cardPreview">
+    <img class="card-frame" src="/frame.jpg" alt="">
+    <img class="card-photo" id="cardPhoto" alt="합성된 사진">
+    <p class="card-text" id="cardText"></p>
+  </div>
+  <div class="write-form">
+    <h2 class="write-title">사진 아래에 남길 한마디</h2>
+    <p class="write-lead">세 줄까지 쓸 수 있어요. 비워 두면 기본 문구가 들어가요.</p>
+    <textarea id="msgInput" rows="3" maxlength="60" placeholder="오늘도 함께 행복하자"></textarea>
+    <div class="msg-meta"><span id="msgCount">0 / 60</span></div>
+    <div class="chips" id="chips">
+      <button type="button" class="chip">오늘도 함께 행복하자</button>
+      <button type="button" class="chip">영산강에서 우리 가족</button>
+      <button type="button" class="chip">노을처럼 따뜻한 하루</button>
+      <button type="button" class="chip">사랑해, 오래오래</button>
+    </div>
+    <div class="write-actions">
+      <button class="btn btn-ghost" id="backToShotBtn" type="button">사진 다시 고르기</button>
+      <button class="btn btn-sail btn-lg" id="finishBtn" type="button">완성하기</button>
+    </div>
+  </div>
+</section>
+
+<!-- 받기 -->
+<section class="screen take" data-screen="take" hidden>
+  <figure class="take-photo">
+    <img id="finalImg" alt="완성된 사진">
+  </figure>
+  <div class="take-side">
+    <h2 class="take-title">우리의 영산강 사진이<br>완성됐어요</h2>
+    <div class="qr" id="qrBox">
+      <img id="qrImg" alt="사진 받기 QR코드">
+      <p class="qr-wait" id="qrWait">QR코드를 만들고 있어요</p>
+    </div>
+    <p class="take-lead">휴대폰 카메라로 QR코드를 비추면<br>사진을 바로 저장할 수 있어요.</p>
+    <div class="take-actions">
+      <button class="btn btn-sail btn-lg" id="doneBtn" type="button">체험 마치기</button>
+      <button class="btn btn-ghost btn-sm" id="muteBtn" type="button" aria-pressed="false">음악 끄기</button>
+    </div>
+    <p class="take-idle" id="takeIdle"></p>
+  </div>
+  <audio id="bgm" src="/bgm/bgm1.mp3" preload="auto" loop></audio>
+</section>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

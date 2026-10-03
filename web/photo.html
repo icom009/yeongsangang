@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f2a2f">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛵</text></svg>">
+  <title>영산강 포토부스 사진</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hahmlet:wght@700&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+  <style>
+    .photo-page {
+      max-width: 520px; margin: 0 auto;
+      padding: 28px 16px calc(36px + env(safe-area-inset-bottom));
+      display: flex; flex-direction: column; gap: 18px;
+    }
+    .photo-page header p { margin: 0 0 4px; color: var(--sail-hi); font-weight: 600; font-size: .95rem; }
+    .photo-page h1 {
+      margin: 0; font-family: var(--display); font-weight: 700;
+      font-size: 1.85rem; letter-spacing: -.03em; line-height: 1.25;
+    }
+    .photo-page .shot {
+      width: 100%; border-radius: 10px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, .4);
+    }
+    .photo-page .actions { display: grid; gap: 10px; }
+    .photo-page .actions .btn { width: 100%; text-decoration: none; }
+    .photo-page .tip { margin: 0; color: var(--mist-dim); font-size: .9rem; text-align: center; }
+    .photo-page .missing { padding: 40px 0; }
+    .photo-page .missing p { color: var(--mist-dim); }
+  </style>
+</head>
+<body>
+<main class="photo-page" data-state="{{STATE}}" data-sid="{{SID}}">
+  <header>
+    <p>2026 나주영산강축제</p>
+    <h1 id="title">오늘의 영산강 사진</h1>
+  </header>
+
+  <div id="ready" hidden>
+    <img class="shot" id="shot" alt="포토부스에서 찍은 사진">
+    <div class="actions" style="margin-top:18px">
+      <button class="btn btn-sail btn-lg" id="shareBtn" type="button" hidden>사진 저장·공유하기</button>
+      <a class="btn btn-sail btn-lg" id="saveFinal" download>프레임 사진 저장하기</a>
+      <a class="btn btn-ghost" id="saveShot" download>프레임 없는 사진 저장하기</a>
+    </div>
+    <p class="tip" style="margin-top:14px">저장이 안 되면 사진을 길게 눌러 ‘사진 앱에 저장’을 고르세요.</p>
+  </div>
+
+  <div class="missing" id="missing" hidden>
+    <p>사진을 찾을 수 없어요. 보관 기간이 지나 삭제됐거나 주소가 잘못됐어요. 부스에서 QR코드를 다시 찍어 주세요.</p>
+  </div>
+</main>
+<script>
+  const page = document.querySelector('.photo-page');
+  const sid = page.dataset.sid;
+  if (page.dataset.state !== 'ready' || !sid) {
+    document.getElementById('missing').hidden = false;
+    document.getElementById('title').textContent = '사진이 없어요';
+  } else {
+    const final = `/media/${sid}/final.jpg`;
+    document.getElementById('ready').hidden = false;
+    document.getElementById('shot').src = final;
+    document.getElementById('saveFinal').href = `${final}?download=1`;
+    document.getElementById('saveShot').href = `/media/${sid}/shot.jpg?download=1`;
+
+    // 휴대폰에서는 공유 시트로 바로 사진 앱에 저장하거나 메신저로 보낼 수 있다
+    const share = document.getElementById('shareBtn');
+    if (navigator.canShare) {
+      fetch(final).then((r) => r.blob()).then((blob) => {
+        const file = new File([blob], 'yeongsangang.jpg', { type: 'image/jpeg' });
+        if (!navigator.canShare({ files: [file] })) return;
+        share.hidden = false;
+        document.getElementById('saveFinal').className = 'btn btn-ghost';
+        share.addEventListener('click', () => {
+          navigator.share({ files: [file], title: '영산강 포토부스' }).catch(() => {});
+        });
+      }).catch(() => {});
+    }
+  }
+</script>
+</body>
+</html>

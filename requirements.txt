@@ -1,6 +1,8 @@
-nicegui
+fastapi
+uvicorn[standard]
+python-multipart
 opencv-python-headless
 pillow
 qrcode
-mediapipe
 numpy
+onnxruntime
