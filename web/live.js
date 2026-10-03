@@ -31,6 +31,8 @@ export class LiveStage {
 
     this.stream = null;
     this.deviceId = null;
+    this.facing = 'user';
+    this.mirror = true;
     this.segmenter = null;
     this.bg = null;
     this.bgPrev = null;
@@ -42,19 +44,23 @@ export class LiveStage {
   }
 
   /* ---------- 카메라 ---------- */
-  async startCamera(deviceId = this.deviceId) {
+  // facing: 'user'(전면) | 'environment'(후면). 노트북처럼 방향 정보가 없으면 deviceId로 고른다
+  async startCamera({ deviceId = this.deviceId, facing = this.facing } = {}) {
     if (this.stream && this.stream.active) {
       this.resume();
       return;
     }
-    const video = deviceId
-      ? { deviceId: { exact: deviceId } }
-      : { facingMode: 'user' };
+    const video = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: facing || 'user' };
     Object.assign(video, { width: { ideal: 1920 }, height: { ideal: 1080 } });
     this.stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
-    this.deviceId = this.stream.getVideoTracks()[0]?.getSettings().deviceId || deviceId;
+    const set = this.stream.getVideoTracks()[0]?.getSettings() || {};
+    this.deviceId = deviceId ? set.deviceId || deviceId : null;
+    this.facing = set.facingMode || facing || 'user';
+    // 전면 카메라는 거울처럼, 후면 카메라는 보이는 그대로
+    this.mirror = this.facing !== 'environment';
     this.video.srcObject = this.stream;
     await this.video.play();
+    this.prev = null;
     this.resume();
   }
 
@@ -75,13 +81,23 @@ export class LiveStage {
   }
 
   async switchCamera() {
+    // 휴대폰·태블릿: 전면 ↔ 후면
+    const supportsFacing = navigator.mediaDevices.getSupportedConstraints?.().facingMode;
+    const mobile = matchMedia('(pointer: coarse)').matches;
+    if (supportsFacing && mobile) {
+      const next = this.facing === 'environment' ? 'user' : 'environment';
+      this.stopCamera();
+      await this.startCamera({ deviceId: null, facing: next });
+      return;
+    }
+    // 노트북·PC: 연결된 카메라를 차례로
     const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
     if (cams.length < 2) return;
-    const i = cams.findIndex((c) => c.deviceId === this.deviceId);
+    const cur = this.deviceId || this.stream?.getVideoTracks()[0]?.getSettings().deviceId;
+    const i = cams.findIndex((c) => c.deviceId === cur);
     const next = cams[(i + 1) % cams.length].deviceId;
     this.stopCamera();
-    this.prev = null;
-    await this.startCamera(next);
+    await this.startCamera({ deviceId: next });
   }
 
   /* ---------- 인물 분리 모델 ---------- */
@@ -214,7 +230,7 @@ export class LiveStage {
     const p = this.pctx;
     p.save();
     p.clearRect(0, 0, W, H);
-    p.setTransform(-1, 0, 0, 1, W, 0); // 거울처럼 좌우 반전
+    if (this.mirror) p.setTransform(-1, 0, 0, 1, W, 0); // 거울처럼 좌우 반전
     p.drawImage(this.video, sx, sy, sw, sh, 0, 0, W, H);
 
     if (this.segmenter) {
@@ -237,14 +253,14 @@ export class LiveStage {
   }
 
   /* ---------- 촬영 ---------- */
-  // 서버에서 다시 합성할 원본(좌우 반전, 4:3, 최대 해상도)을 JPEG으로
+  // 서버에서 다시 합성할 원본(미리보기와 같은 방향, 4:3, 최대 해상도)을 JPEG으로
   capture() {
     const { sx, sy, sw, sh } = this.crop();
     const w = Math.round(Math.min(sw, 1920));
     const h = Math.round(w / ASPECT);
     const c = new OffscreenCanvas(w, h);
     const x = c.getContext('2d');
-    x.setTransform(-1, 0, 0, 1, w, 0);
+    if (this.mirror) x.setTransform(-1, 0, 0, 1, w, 0);
     x.drawImage(this.video, sx, sy, sw, sh, 0, 0, w, h);
     return c.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
   }

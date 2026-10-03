@@ -103,6 +103,7 @@ async function start() {
   btn.disabled = true;
   btn.textContent = '카메라를 켜는 중…';
   sound.unlock();
+  unlockBgm();
   try {
     if (!live) live = new LiveStage($('#stageCanvas'));
     await live.startCamera();
@@ -125,9 +126,17 @@ async function start() {
   }
 }
 
+// iOS는 클릭 직후가 아니면 음악 재생을 막으므로, 시작 버튼을 누를 때 미리 한 번 재생해 둔다
+function unlockBgm() {
+  const bgm = $('#bgm');
+  bgm.muted = true;
+  bgm.play().then(() => { bgm.pause(); bgm.currentTime = 0; bgm.muted = false; })
+    .catch(() => { bgm.muted = false; });
+}
+
 function cameraErrorText(e) {
   if (!window.isSecureContext) {
-    return '카메라는 https 주소나 이 컴퓨터(localhost)에서만 켤 수 있어요. 주소를 확인해 주세요.';
+    return '이 주소에서는 카메라를 켤 수 없어요. 휴대폰에서는 https로 시작하는 주소로 접속해 주세요.';
   }
   if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
     return '카메라 권한이 막혀 있어요. 주소창 옆 카메라 아이콘에서 허용한 뒤 다시 눌러 주세요.';

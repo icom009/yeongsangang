@@ -3,6 +3,7 @@ import contextlib
 import html
 import os
 import socket
+import subprocess
 
 import cv2
 import numpy as np
@@ -169,7 +170,31 @@ def photo_page(sid: str):
     return HTMLResponse(page, status_code=200 if ok else 404, headers=NO_STORE)
 
 
+def self_signed_cert():
+    """같은 Wi-Fi의 휴대폰이 https로 접속할 수 있게 자체 서명 인증서를 만든다."""
+    d = config.ROOT / 'certs'
+    d.mkdir(exist_ok=True)
+    cert, key = d / 'cert.pem', d / 'key.pem'
+    ip = _lan_ip() or '127.0.0.1'
+    stamp = d / 'ip.txt'
+    if not (cert.exists() and key.exists() and stamp.exists() and stamp.read_text() == ip):
+        subprocess.run([
+            'openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '365',
+            '-keyout', str(key), '-out', str(cert), '-subj', '/CN=yeongsangang-booth',
+            '-addext', f'subjectAltName=IP:{ip},IP:127.0.0.1,DNS:localhost',
+        ], check=True, capture_output=True)
+        stamp.write_text(ip)
+    return cert, key, ip
+
+
 if __name__ == '__main__':
     import uvicorn
-    uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)),
-                proxy_headers=True, forwarded_allow_ips='*')
+    opts = {}
+    port = int(os.environ.get('PORT', 8080))
+    if os.environ.get('YS_HTTPS') == '1':
+        cert, key, ip = self_signed_cert()
+        port = int(os.environ.get('PORT', 8443))
+        opts = {'ssl_certfile': str(cert), 'ssl_keyfile': str(key)}
+        print(f'\n  휴대폰에서 열기: https://{ip}:{port}\n')
+    uvicorn.run(app, host='0.0.0.0', port=port,
+                proxy_headers=True, forwarded_allow_ips='*', **opts)
