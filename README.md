@@ -102,6 +102,7 @@ docker compose --env-file .env.local up -d        # 부스 화면: http://localh
 | `YS_MATTING_SIZE` | 640 | 합성 정밀도(내부 해상도). 서버가 느리면 512로 낮추세요 |
 | `YS_DEVICE` | auto | 매팅 장치. `auto`면 GPU(CUDA)가 있을 때 GPU, `cpu`면 항상 CPU |
 | `YS_MATTING_MODEL` | mobilenetv3 | `resnet50`은 머리카락 경계가 더 섬세합니다(GPU 서버용, 이미지 빌드 때 받아 둠) |
+| `YS_SEGMENT_MODEL` | 없음 | `birefnet`이면 몸통 윤곽을 BiRefNet으로 보강합니다(어깨가 반투명하게 비는 문제). GPU에서만 켜집니다 |
 | `YS_BEAUTY` | 1 | 장소 빛 필터·인물 보정 세기. `0`이면 끄고, 더 진하게는 `1.3` 정도 |
 | `YS_OUT_DIR` | `output/` | 사진 저장 위치 |
 

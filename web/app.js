@@ -334,7 +334,12 @@ async function selectBg(id) {
   void cap.offsetWidth;
   cap.classList.add('show');
   try {
-    live.setBackground(await loadImage(`/bg/${id}.jpg`));
+    // 앞 가림 레이어(갈대·꽃 등)가 있는 장소는 인물 위에 함께 얹는다 (서버 합성과 같게)
+    const [bg, fg] = await Promise.all([
+      loadImage(`/bg/${id}.jpg`),
+      b.fg ? loadImage(`/bg/${id}_fg.webp`).catch(() => null) : null,
+    ]);
+    live.setBackground(bg, fg);
   } catch {
     toast('배경 사진을 불러오지 못했어요. 다른 장소를 골라 보세요.');
   }

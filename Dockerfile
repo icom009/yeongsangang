@@ -15,9 +15,10 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 COPY booth booth
 COPY scripts scripts
-# 매팅 모델도 빌드 때 받아 둔다 (GPU 서버는 resnet50)
+# 매팅 모델도 빌드 때 받아 둔다 (GPU 서버는 resnet50 + birefnet)
 ARG MATTING=mobilenetv3
-ENV YS_MATTING_MODEL=$MATTING
+ARG SEGMENT=
+ENV YS_MATTING_MODEL=$MATTING YS_SEGMENT_MODEL=$SEGMENT
 RUN python scripts/fetch_models.py
 
 COPY . .

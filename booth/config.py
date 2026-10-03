@@ -29,6 +29,11 @@ if MATTING_NAME not in ('mobilenetv3', 'resnet50'):
 MATTING_MODEL = MODEL_DIR / f'rvm_{MATTING_NAME}.onnx'
 MATTING_URL = ('https://github.com/PeterL1n/RobustVideoMatting/releases/download/'
                f'v1.0.0/rvm_{MATTING_NAME}_fp32.onnx')
+# 몸통 윤곽 보강(BiRefNet lite, MIT). 옷이 배경과 비슷한 색이면 RVM이 어깨를 반투명 점박이로 잡는데,
+# 이 모델로 몸통을 꽉 채우고 머리카락 디테일은 RVM 것을 쓴다. GPU 서버용(약 0.2초), 비우면 끔
+SEGMENT_NAME = os.environ.get('YS_SEGMENT_MODEL', '')
+SEGMENT_MODEL = MODEL_DIR / 'birefnet_lite.onnx'
+SEGMENT_URL = 'https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model.onnx'
 # 매팅 시 내부 해상도(긴 변). RVM은 512~640쯤이 가장 좋고, 1000 넘게 올리면 오히려 경계가 뭉개진다
 MATTING_SIZE = int(os.environ.get('YS_MATTING_SIZE', 640))
 # 1이면 인터넷(공개 주소)에서도 부스 키 없이 촬영 화면·API를 모두 연다
@@ -91,6 +96,11 @@ BACKGROUNDS = [
 ]
 BG_IDS = {b['id'] for b in BACKGROUNDS}
 BG_BY_ID = {b['id']: b for b in BACKGROUNDS}
+
+
+def has_foreground(bg_id):
+    """배경 앞쪽 사물 마스크(backgrounds/fg_N.png)가 있는지. scripts/make_foreground.py로 만든다."""
+    return (BG_DIR / f'fg_{bg_id}.png').exists()
 
 
 def public_base_url():

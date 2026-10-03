@@ -173,7 +173,9 @@ export class LiveStage {
     this.personFilter = css || PERSON_FILTER;
   }
 
-  setBackground(img) {
+  // fg: 배경 앞쪽 사물만 남긴 투명 이미지 (없으면 null)
+  setBackground(img, fg = null) {
+    this.fg = fg;
     if (this.bg === img) return;
     this.bgPrev = this.bg;
     this.bg = img;
@@ -369,6 +371,8 @@ export class LiveStage {
       if (!IS_MOBILE && this.mask) ctx.filter = this.personFilter;
       ctx.drawImage(this.person, 0, 0);
       ctx.filter = 'none';
+      // 3) 앞 가림 레이어: 갈대·꽃이 인물 앞에 오도록 (배경 전환 중에는 생략)
+      if (this.fg && !this.bgPrev) this.drawCover(ctx, this.fg);
     }
   }
 

@@ -5,9 +5,10 @@ import time
 from functools import lru_cache
 
 import cv2
+import numpy as np
 
 from . import config
-from .compose import read_image
+from .compose import foreground_mask, read_image
 
 _ID = re.compile(r'^[A-Za-z0-9_-]{10,32}$')
 KINDS = ('shot', 'plain', 'final')  # shot: 장소 빛 필터 적용, plain: 필터 없는 합성
@@ -55,3 +56,14 @@ def frame_jpeg():
     img = read_image(config.FRAME)
     return cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tobytes()
 
+
+
+@lru_cache(maxsize=16)
+def foreground_webp(bg_id, width=1600):
+    """미리보기용 앞 가림 레이어: 배경 색 + 앞쪽 사물 마스크를 알파로 담은 투명 WebP."""
+    img = read_image(config.BG_DIR / f'bg_{bg_id}.png')
+    h = round(width * img.shape[0] / img.shape[1])
+    img = cv2.resize(img, (width, h), interpolation=cv2.INTER_AREA)
+    m = foreground_mask(bg_id, width, h)
+    rgba = np.dstack([img, np.uint8(m * 255 + 0.5)])
+    return cv2.imencode('.webp', rgba, [cv2.IMWRITE_WEBP_QUALITY, 85])[1].tobytes()

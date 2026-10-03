@@ -37,7 +37,7 @@ async def _cleanup_loop():
 @contextlib.asynccontextmanager
 async def lifespan(_):
     # 모델은 첫 촬영 전에 미리 올려 둔다 (첫 손님이 기다리지 않도록)
-    await asyncio.to_thread(compose._get_session)
+    await asyncio.to_thread(compose.warmup)
     task = asyncio.create_task(_cleanup_loop())
     yield
     task.cancel()
@@ -123,7 +123,7 @@ def index():
 @app.get('/api/config')
 def get_config():
     return {
-        'backgrounds': config.BACKGROUNDS,
+        'backgrounds': [{**b, 'fg': config.has_foreground(b['id'])} for b in config.BACKGROUNDS],
         'shot': {'width': config.SHOT_W, 'height': config.SHOT_H},
         'frame': {
             'size': [1024, 1536],
@@ -142,6 +142,13 @@ def background(bg_id: int, w: int = 1600):
         raise HTTPException(404)
     w = 480 if w <= 480 else 800 if w <= 800 else 1600
     return Response(storage.background_jpeg(bg_id, w), media_type=JPEG, headers=LONG_CACHE)
+
+
+@app.get('/bg/{bg_id}_fg.webp')
+def background_foreground(bg_id: int):
+    if bg_id not in config.BG_IDS or not config.has_foreground(bg_id):
+        raise HTTPException(404)
+    return Response(storage.foreground_webp(bg_id), media_type='image/webp', headers=LONG_CACHE)
 
 
 @app.get('/frame.jpg')
