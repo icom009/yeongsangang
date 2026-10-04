@@ -243,7 +243,8 @@ def _keep_background(img, bg_id):
     if float((a > 0.5).mean()) < 0.01:  # 사람을 못 찾으면 GPT 결과를 그대로 쓴다
         return img
     bg = compose.cover(compose.read_image(config.BG_DIR / f'bg_{bg_id}.png'), W, H).astype(np.float32) / 255
-    F = compose.estimate_foreground(photo.astype(np.float32) / 255, a)
+    # 본 합성과 같이: 경계에 묻은 GPT 배경색·역광 테두리를 걷어 낸 뒤 원래 배경 빛으로 감싼다
+    F = compose.decontaminate(compose.estimate_foreground(photo.astype(np.float32) / 255, a), a)
     F = compose.light_wrap(F, a, bg)
     out = compose._finish(F, a, bg, compose.foreground_mask(bg_id, W, H))
     return Image.fromarray(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
