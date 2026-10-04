@@ -184,7 +184,7 @@
       wanted = id;
       fxState[id] = 'pending';
       renderChips();
-      note.textContent = 'AI가 그리고 있어요. 20초쯤 걸려요. 화면을 닫지 말고 기다려 주세요.';
+      note.textContent = 'AI가 그리고 있어요. 30초쯤 걸려요. 화면을 닫지 말고 기다려 주세요.';
       note.hidden = false;
       try {
         const res = await (await fetch(`/p/${sid}/fx/${id}`, { method: 'POST' })).json();
