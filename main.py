@@ -6,6 +6,7 @@ import html
 import logging
 import mimetypes
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -315,7 +316,16 @@ def qr(sid: str, request: Request):
 # 사진 이력을 보고, 링크·QR을 다시 꺼내고, 메일로 다시 보내고, 지우는 곳.
 # 공개 주소로도 열리므로(YS_OPEN=1) 비밀번호가 유일한 자물쇠다. 현장에서 꼭 바꿔 쓸 것
 MANAGE_COOKIE = 'ys_manage'
-_manage_tries = {}
+# 비밀번호를 5번 틀린 기기는 1시간 동안 로그인할 수 없다.
+# Docker Desktop을 거치면 모든 접속이 같은 주소(172.18.0.1)로 보여서 주소로 막으면 관리자까지 막힌다.
+# 그래서 관리 화면을 처음 열 때 기기마다 표식(쿠키)을 주고 그 기기만 막는다.
+# 관리 화면을 거치지 않고 로그인 주소만 두드리는 로봇(표식 없음)은 한 묶음으로 세어 막는다
+MANAGE_DEVICE = 'ys_mdev'
+MANAGE_MAX_FAILS = 5
+MANAGE_LOCK_SEC = 3600
+NO_DEVICE = '-'
+_manage_fails = {}   # 기기 표식 -> 틀린 시각들
+_manage_locked = {}  # 기기 표식 -> 풀리는 시각
 
 
 def _manage_token():
@@ -337,26 +347,46 @@ class MailBody(BaseModel):
     attach: bool = True
 
 
+def _device(request: Request):
+    d = request.cookies.get(MANAGE_DEVICE, '')
+    return d if re.fullmatch(r'[A-Za-z0-9_-]{16,64}', d) else NO_DEVICE
+
+
 @app.get('/manage', response_class=HTMLResponse)
-def manage_page():
-    return FileResponse(config.WEB_DIR / 'manage.html', headers=NO_STORE)
+def manage_page(request: Request):
+    res = FileResponse(config.WEB_DIR / 'manage.html', headers=NO_STORE)
+    if _device(request) == NO_DEVICE:  # 이 기기의 표식 (비밀번호를 틀린 기기만 막으려고)
+        res.set_cookie(MANAGE_DEVICE, secrets.token_urlsafe(18), max_age=60 * 60 * 24 * 365,
+                       httponly=True, secure=request.url.scheme == 'https', samesite='lax')
+    return res
 
 
 @app.post('/api/manage/login')
 async def manage_login(body: LoginBody, request: Request):
-    ip = request.client.host if request.client else '?'
+    dev = _device(request)
     now = time.time()
-    if len(_manage_tries) > 1000:  # 오래된 기록은 버린다
-        for k in [k for k, v in _manage_tries.items() if not v or now - v[-1] > 300]:
-            _manage_tries.pop(k, None)
-    hits = [t for t in _manage_tries.get(ip, []) if now - t < 300]
-    if len(hits) >= 10:  # 비밀번호 무차별 대입 막기
-        raise HTTPException(429, '시도가 너무 많아요. 5분 뒤에 다시 해 주세요.')
+    if len(_manage_fails) + len(_manage_locked) > 2000:  # 오래된 기록은 버린다
+        for k in [k for k, v in _manage_locked.items() if v <= now]:
+            _manage_locked.pop(k, None)
+        for k in [k for k, v in _manage_fails.items() if not v or now - v[-1] > MANAGE_LOCK_SEC]:
+            _manage_fails.pop(k, None)
+    until = _manage_locked.get(dev, 0)
+    if until > now:
+        mins = max(1, round((until - now) / 60))
+        raise HTTPException(429, f'비밀번호를 {MANAGE_MAX_FAILS}번 틀려 이 기기는 {mins}분 동안 들어올 수 없어요.')
     if not secrets.compare_digest(body.password, config.MANAGE_KEY):
-        _manage_tries[ip] = hits + [now]
-        await asyncio.sleep(0.5)
-        raise HTTPException(401, '비밀번호가 달라요.')
-    _manage_tries.pop(ip, None)
+        fails = [t for t in _manage_fails.get(dev, []) if now - t < MANAGE_LOCK_SEC] + [now]
+        _manage_fails[dev] = fails
+        await asyncio.sleep(1)  # 마구 넣어 보는 것을 늦춘다
+        if len(fails) >= MANAGE_MAX_FAILS:
+            _manage_locked[dev] = now + MANAGE_LOCK_SEC
+            _manage_fails.pop(dev, None)
+            print(f'[관리] 비밀번호 {MANAGE_MAX_FAILS}번 틀림, 이 기기 1시간 정지 '
+                  f'({"표식 없음(로봇)" if dev == NO_DEVICE else dev[:6] + "…"})', flush=True)
+            raise HTTPException(429, f'비밀번호를 {MANAGE_MAX_FAILS}번 틀려 이 기기는 1시간 동안 들어올 수 없어요.')
+        raise HTTPException(401, f'비밀번호가 달라요. ({len(fails)}/{MANAGE_MAX_FAILS}번, '
+                                 f'{MANAGE_MAX_FAILS}번 틀리면 1시간 동안 들어올 수 없어요)')
+    _manage_fails.pop(dev, None)
     res = JSONResponse({'ok': True})
     res.set_cookie(MANAGE_COOKIE, _manage_token(), max_age=60 * 60 * 12, httponly=True,
                    secure=request.url.scheme == 'https', samesite='lax')

@@ -189,17 +189,25 @@
     e.preventDefault();
     $('#loginBtn').disabled = true;
     try {
-      await api('/api/manage/login', {
+      // 틀린 횟수·정지 안내를 서버가 알려 주므로 그대로 보여 준다
+      const res = await fetch('/api/manage/login', {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: $('#pw').value }),
       });
+      if (!res.ok) {
+        let msg = '비밀번호가 달라요.';
+        try { msg = (await res.json()).detail || msg; } catch { /* 본문 없음 */ }
+        throw new Error(msg);
+      }
       $('#loginErr').textContent = '';
       $('#pw').value = '';
       $('#loginDlg').close();
       reload();
     } catch (err) {
-      $('#loginErr').textContent = err.message === '401' ? '비밀번호가 달라요.' : err.message;
+      $('#loginErr').textContent = err.message;
+      $('#pw').select();
     } finally {
       $('#loginBtn').disabled = false;
     }
