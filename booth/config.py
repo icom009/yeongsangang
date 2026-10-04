@@ -40,6 +40,9 @@ MATTING_SIZE = int(os.environ.get('YS_MATTING_SIZE', 640))
 OPEN = os.environ.get('YS_OPEN') == '1'
 # 매팅 장치. auto면 GPU(CUDA)가 있을 때 GPU, cpu면 항상 CPU
 DEVICE = os.environ.get('YS_DEVICE', 'auto').lower()
+# 매팅이 쓸 GPU 메모리 상한(MB). 0이면 상한 없음. 추론마다 다 쓴 메모리를 돌려주므로 평소엔 필요 없다
+# (BiRefNet 1024x1024는 잠깐 수 GB를 써서 5GB 상한으로는 켜지지도 않았다)
+GPU_MEM_MB = int(os.environ.get('YS_GPU_MEM_MB') or 0)
 # 동시에 합성하는 사진 수. 나머지는 차례로 기다린다 (한 장에 메모리 약 350MB, CPU를 나눠 쓴다)
 COMPOSE_SLOTS = max(1, int(os.environ.get('YS_COMPOSE_SLOTS', 2)))
 

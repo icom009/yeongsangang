@@ -68,10 +68,31 @@ def _providers(ort):
     if config.DEVICE != 'cpu' and 'CUDAExecutionProvider' in ort.get_available_providers():
         if hasattr(ort, 'preload_dlls'):  # pip로 깐 CUDA·cuDNN 라이브러리를 찾아 올린다
             ort.preload_dlls()
-        # 메모리 풀은 필요한 만큼만 늘린다 (기본값은 2배씩 늘려 VRAM을 금방 채운다)
-        return [('CUDAExecutionProvider', {'cudnn_conv_algo_search': 'HEURISTIC',
-                                           'arena_extend_strategy': 'kSameAsRequested'}),
-                'CPUExecutionProvider']
+        # GPU 메모리를 있는 대로 잡지 않게 묶어 둔다. 그냥 두면 켜자마자 빈 VRAM을 9GB 넘게 가져가
+        # (cuDNN 작업 공간 + 2배씩 늘리는 메모리 풀) IC-Light와 Windows 화면이 쓸 자리가 없어지고,
+        # 그러면 GPU 메모리가 RAM으로 밀려나 촬영이 수십 초 걸리고 컴퓨터 전체가 멈췄다
+        opts = {'cudnn_conv_algo_search': 'HEURISTIC',
+                'cudnn_conv_use_max_workspace': '0',
+                'arena_extend_strategy': 'kSameAsRequested'}
+        if config.GPU_MEM_MB > 0:  # 기본은 상한 없음 (BiRefNet 1024x1024는 잠깐 수 GB를 쓴다)
+            opts['gpu_mem_limit'] = str(config.GPU_MEM_MB * 1024 * 1024)
+        return [('CUDAExecutionProvider', opts), 'CPUExecutionProvider']
+
+
+_run_opts = None
+
+
+def _run_options():
+    """GPU에서는 한 번 추론할 때마다 다 쓴 메모리를 돌려준다. 그냥 두면 가장 많이 쓴 만큼을
+    계속 쥐고 있어(실측 9GB) IC-Light와 Windows 화면이 쓸 VRAM이 없어진다."""
+    global _run_opts
+    if _run_opts is None:
+        import onnxruntime as ort
+        ro = ort.RunOptions()
+        if _on_gpu:
+            ro.add_run_config_entry('memory.enable_memory_arena_shrinkage', 'gpu:0')
+        _run_opts = ro
+    return _run_opts
     return ['CPUExecutionProvider']
 
 
@@ -122,7 +143,7 @@ def matte(bgr):
     sess = _get_session()
     with _gpu_lock if _on_gpu else contextlib.nullcontext():
         _, a, *_ = sess.run(None, {'src': x, 'r1i': z, 'r2i': z, 'r3i': z, 'r4i': z,
-                                    'downsample_ratio': ratio})
+                                    'downsample_ratio': ratio}, _run_options())
         body = _body_mask(bgr) if _segment is not None else None
     a = a[0, 0]
     # 배경의 옅은 잡음은 지우고, 몸 안쪽의 반투명은 채운다
@@ -139,7 +160,7 @@ def _body_mask(bgr):
     x = cv2.resize(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), (1024, 1024), interpolation=cv2.INTER_AREA)
     x = (x.astype(np.float32) / 255 - (0.485, 0.456, 0.406)) / (0.229, 0.224, 0.225)
     x = np.ascontiguousarray(x.transpose(2, 0, 1)[None], dtype=np.float32)
-    o = _segment.run(None, {_segment.get_inputs()[0].name: x})[-1][0, 0]
+    o = _segment.run(None, {_segment.get_inputs()[0].name: x}, _run_options())[-1][0, 0]
     return cv2.resize(1 / (1 + np.exp(-o)), (w, h), interpolation=cv2.INTER_LINEAR).astype(np.float32)
 
 
