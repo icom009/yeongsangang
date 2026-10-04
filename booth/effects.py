@@ -29,6 +29,13 @@ _day = {'date': None, 'count': 0, 'cost': 0.0}
 _USAGE = config.OUT_DIR / 'gpt_usage.json'
 _loaded = False
 _tasks = set()        # 돌고 있는 작업 (가비지 컬렉션에 사라지지 않도록 붙잡아 둔다)
+_tries = {}           # (sid, 효과 id) -> 만들어 본 횟수. 같은 사진·같은 효과는 실패해도 다시 한 번까지만
+MAX_TRIES = 2
+# 만드는 중인 작업의 진행 상황. 휴대폰 화면의 진행 애니메이션이 이걸 보고 움직인다
+# stage: send(보내는 중) -> draw(GPT가 그리는 중) -> finish(얼굴 확인·배경 맞추기·프레임)
+_progress = {}        # (sid, 효과 id) -> {'stage', 'drawn', 'done', 'total', 't0'}
+_avg = {}             # 효과 id -> 최근 걸린 시간(초). 예상 시간으로 보여 준다
+DEFAULT_ETA = 32.0    # 실측: 한 장 약 30초 + 마무리
 
 
 def enabled():
@@ -55,9 +62,29 @@ def status(sid):
             continue
         with _lock:
             st = _jobs.get((sid, fx))
+            p = dict(_progress.get((sid, fx)) or {})
         if st:
-            out[fx] = {'state': st}
+            item = {'state': st}
+            if st == 'pending' and p:
+                item.update(stage=p['stage'], done=p['done'], total=p['total'],
+                            elapsed=round(time.time() - p['t0'], 1),
+                            eta=round(_avg.get(fx, DEFAULT_ETA), 1))
+            out[fx] = item
     return out
+
+
+def _step(sid, fx, stage=None, drawn=0, done=0):
+    """진행 상황을 한 칸 옮긴다. 네 컷은 네 장을 다 그려야 '마무리'로 넘어간다."""
+    with _lock:
+        p = _progress.get((sid, fx))
+        if not p:
+            return
+        p['drawn'] += drawn
+        p['done'] += done
+        if stage:
+            p['stage'] = stage
+        elif drawn and p['drawn'] >= p['total']:
+            p['stage'] = 'finish'
 
 
 def _today():
@@ -116,9 +143,15 @@ def request(sid, fx):
         return {'state': 'off'}
     if fx not in config.EFFECT_BY_ID:
         return {'state': 'unknown'}
+    # 이미 만든 사진은 그대로 돌려주고, 만드는 중이면 그 작업에 합류한다 (같은 일을 두 번 보내지 않는다)
     cur = status(sid).get(fx)
     if cur and cur['state'] in ('ready', 'pending'):
         return cur
+    with _lock:
+        if _tries.get((sid, fx), 0) >= MAX_TRIES:  # 실패한 것을 끝없이 다시 보내지 않는다
+            _jobs[(sid, fx)] = 'max'
+            return {'state': 'max'}
+        _tries[(sid, fx)] = _tries.get((sid, fx), 0) + 1
     rec = records.get(sid)
     if rec is None or not storage.path(sid, 'final').exists():
         return {'state': 'missing'}
@@ -132,6 +165,8 @@ def request(sid, fx):
         return {'state': 'limit'}
     with _lock:
         _jobs[(sid, fx)] = 'pending'
+        _progress[(sid, fx)] = {'stage': 'send', 'drawn': 0, 'done': 0, 'total': len(sources),
+                                't0': time.time()}
     task = asyncio.get_running_loop().create_task(_make(sid, fx, rec, sources))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
@@ -162,6 +197,7 @@ async def _make(sid, fx, rec, sources):
             if attempt and not _spend(1):  # 다시 그리는 것도 하루 상한 안에서만
                 break
             async with _sem:
+                _step(sid, fx, 'draw')
                 img = await asyncio.to_thread(_edit, path, effect['prompt'])
             found = await asyncio.to_thread(count_faces, _bgr(img))
             if base and found > base:
@@ -169,20 +205,27 @@ async def _make(sid, fx, rec, sources):
                 print(f'[효과] 얼굴이 {base}명에서 {found}명으로 늘어 버림 ({sid} {fx}, {attempt + 1}번째)',
                       flush=True)
                 continue
+            _step(sid, fx, drawn=1)
             if keep:
                 img = await asyncio.to_thread(_keep_background, img, bg_id)
+            _step(sid, fx, done=1)
             return img
         raise RuntimeError('GPT가 없던 사람을 그려 넣었다')
 
     try:
         imgs = await asyncio.gather(*[one(p, b) for p, b in zip(sources, bgs)])
+        _step(sid, fx, 'finish')
         await asyncio.to_thread(_save, sid, fx, imgs, rec.get('msg', ''))
+        took = time.time() - t0
         with _lock:
             _jobs.pop((sid, fx), None)
-        print(f'[효과] 완료 {sid} {fx} ({len(imgs)}장, {time.time() - t0:.1f}초)', flush=True)
+            _progress.pop((sid, fx), None)
+            _avg[fx] = took if fx not in _avg else _avg[fx] * 0.7 + took * 0.3
+        print(f'[효과] 완료 {sid} {fx} ({len(imgs)}장, {took:.1f}초)', flush=True)
     except Exception as e:  # 실패해도 방문객은 원본을 그대로 받는다
         with _lock:
             _jobs[(sid, fx)] = 'failed'
+            _progress.pop((sid, fx), None)
         print(f'[효과] 실패 {sid} {fx}: {e}', flush=True)
 
 

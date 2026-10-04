@@ -434,6 +434,31 @@ function setReview(on) {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// 합성을 기다리는 동안 돌아가며 보여 줄 문구 (화면이 멈춘 것처럼 보이지 않게)
+const BUSY_TIPS = [
+  '사람과 풍경 사이 경계를 다듬고 있어요',
+  '영산강의 빛을 얼굴에 입히는 중이에요',
+  '머리카락 한 올까지 살피는 중이에요',
+  '갈대와 꽃을 앞쪽에 다시 심는 중이에요',
+  '그곳의 노을빛·햇살 색을 맞추는 중이에요',
+  '사진 속 주인공이 돋보이게 다듬는 중이에요',
+  '거의 다 됐어요',
+];
+
+function rotateTips(el, tips, ms = 2400) {
+  let i = 0;
+  const showTip = () => {
+    el.classList.remove('tip-in');
+    void el.offsetWidth;
+    el.textContent = tips[i % tips.length];
+    el.classList.add('tip-in');
+    i += 1;
+  };
+  showTip();
+  const timer = setInterval(showTip, ms);
+  return () => { clearInterval(timer); el.textContent = ''; };
+}
+
 async function countdown(sec) {
   const cd = $('#countdown');
   for (let n = sec; n > 0; n--) {
@@ -513,6 +538,7 @@ async function shoot() {
       if (!$('#busy').hidden) $('#busyText').textContent = `${done} / 4장 담았어요. 잠시만 기다려 주세요`;
     }).catch(() => {}));
   }
+  const stopTips = rotateTips($('#busyTip'), BUSY_TIPS);
   // 여러 부스에서 한꺼번에 찍으면 서버가 차례로 만든다. 오래 걸리면 기다리는 이유를 알려 준다
   const slow = setTimeout(() => { $('#busyText').textContent = '찍는 분들이 많아 조금 더 걸려요. 곧 완성돼요'; }, 5000);
   try {
@@ -530,6 +556,7 @@ async function shoot() {
     finishShoot(false);
   } finally {
     clearTimeout(slow);
+    stopTips();
   }
 }
 
