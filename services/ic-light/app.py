@@ -153,7 +153,13 @@ def relight(req: Req):
     if not _ready:
         raise HTTPException(503, 'loading')
     with _gpu:
-        img = _relight(req)
+        try:
+            img = _relight(req)
+        finally:
+            # 한 장 끝날 때마다 쥐고 있던 GPU 메모리를 돌려준다. 같은 GPU로 부스 매팅과
+            # Windows 화면까지 돌리므로, 쥐고 있으면 VRAM이 차서 컴퓨터 전체가 버벅인다
+            if DEVICE == 'cuda':
+                torch.cuda.empty_cache()
     buf = io.BytesIO()
     img.save(buf, 'JPEG', quality=94)
     return {'image': base64.b64encode(buf.getvalue()).decode()}

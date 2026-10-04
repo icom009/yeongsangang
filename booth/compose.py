@@ -1,5 +1,6 @@
 """인물 합성: RVM 매팅 → 전경색 복원 → 배경과 색감 맞추기 → 합성.
 필터 버전은 여기에 장소의 빛 맞추기(톤·색·해 방향 빛)와 인물 보정을 더한다."""
+import contextlib
 import functools
 import os
 import threading
@@ -13,6 +14,11 @@ from . import config
 _session = None
 _segment = None
 _lock = threading.Lock()
+# GPU 추론은 한 번에 하나씩. GPU는 어차피 차례로 돌리므로 빨라지지 않고, 여러 장을 동시에 올리면
+# onnxruntime이 GPU 메모리를 계속 늘려(2배씩, 돌려주지 않음) 12GB가 꽉 찬다. 꽉 차면 Windows가
+# GPU 메모리를 RAM으로 밀어내 한 장에 수십 초가 걸렸다(실측 37~90초). CPU 후처리는 그대로 병렬이다
+_gpu_lock = threading.Lock()
+_on_gpu = False
 
 
 def _download(path, url):
@@ -41,7 +47,7 @@ def _new_session(path):
 
 
 def _get_session():
-    global _session, _segment
+    global _session, _segment, _on_gpu
     if _session is None:
         with _lock:
             if _session is None:
@@ -49,6 +55,7 @@ def _get_session():
                 _session = _new_session(config.MATTING_MODEL)
                 # 몸통 보강은 GPU에서만 (CPU로는 한 장에 8초쯤 더 걸린다)
                 on_gpu = _session.get_providers()[0] == 'CUDAExecutionProvider'
+                _on_gpu = on_gpu
                 if config.SEGMENT_NAME and on_gpu:
                     _segment = _new_session(config.SEGMENT_MODEL)
                 print(f'[합성] 매팅 장치: {_session.get_providers()[0]}, '
@@ -61,7 +68,9 @@ def _providers(ort):
     if config.DEVICE != 'cpu' and 'CUDAExecutionProvider' in ort.get_available_providers():
         if hasattr(ort, 'preload_dlls'):  # pip로 깐 CUDA·cuDNN 라이브러리를 찾아 올린다
             ort.preload_dlls()
-        return [('CUDAExecutionProvider', {'cudnn_conv_algo_search': 'HEURISTIC'}),
+        # 메모리 풀은 필요한 만큼만 늘린다 (기본값은 2배씩 늘려 VRAM을 금방 채운다)
+        return [('CUDAExecutionProvider', {'cudnn_conv_algo_search': 'HEURISTIC',
+                                           'arena_extend_strategy': 'kSameAsRequested'}),
                 'CPUExecutionProvider']
     return ['CPUExecutionProvider']
 
@@ -111,14 +120,16 @@ def matte(bgr):
     z = np.zeros((1, 1, 1, 1), np.float32)
     ratio = np.array([min(1.0, config.MATTING_SIZE / max(h, w))], np.float32)
     sess = _get_session()
-    _, a, *_ = sess.run(None, {'src': x, 'r1i': z, 'r2i': z, 'r3i': z, 'r4i': z,
-                                'downsample_ratio': ratio})
+    with _gpu_lock if _on_gpu else contextlib.nullcontext():
+        _, a, *_ = sess.run(None, {'src': x, 'r1i': z, 'r2i': z, 'r3i': z, 'r4i': z,
+                                    'downsample_ratio': ratio})
+        body = _body_mask(bgr) if _segment is not None else None
     a = a[0, 0]
     # 배경의 옅은 잡음은 지우고, 몸 안쪽의 반투명은 채운다
     a = np.clip((a - 0.03) / 0.94, 0, 1).astype(np.float32)
     gaps = open_gaps(a)  # 브이 자세의 손과 얼굴 사이처럼 '진짜 뚫린' 곳은 메우지 않는다
-    if _segment is not None:
-        a = _merge_body(a, _body_mask(bgr), gaps)
+    if body is not None:
+        a = _merge_body(a, body, gaps)
     return solidify(a, gaps)
 
 

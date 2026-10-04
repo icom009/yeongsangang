@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
 # 모델(약 6GB)은 처음 켤 때 /cache로 내려받는다. docker-compose.ai.yml이 볼륨으로 붙여 두니 한 번만 받는다
-ENV HF_HOME=/cache PORT=8000
+# 조각난 GPU 메모리를 줄여 같은 일에 메모리를 덜 쓰게 한다
+ENV HF_HOME=/cache PORT=8000 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 EXPOSE 8000
 CMD ["python", "app.py"]
