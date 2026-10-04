@@ -5,7 +5,16 @@
 	encode zstd gzip
 
 	# 검색엔진에 올라가지 않게 한다 (방문객 사진 주소가 검색되면 안 된다)
-	header X-Robots-Tag "noindex, nofollow, noarchive"
+	header {
+		X-Robots-Tag "noindex, nofollow, noarchive"
+		# 늘 https로만 (한 번 들어온 브라우저는 http로 내려가지 않는다)
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		# 다른 사이트가 관리 화면 등을 몰래 액자(iframe)에 넣어 누르게 하지 못하게
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
 	# 링크 미리보기 봇(카카오톡·문자·메신저)만 들어오게 하고 검색 로봇은 막는다
 	respond /robots.txt "User-agent: kakaotalk-scrap
 Allow: /

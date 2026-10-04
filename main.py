@@ -183,8 +183,17 @@ def message_font():
     return FileResponse(config.FONT, media_type='font/ttf', headers=LONG_CACHE)
 
 
+_client_logs = []
+
+
 @app.post('/api/log')
 async def client_log(request: Request):
+    # 공개 주소(YS_OPEN=1)라 누가 마구 보내도 로그가 넘치지 않게 1분에 60건까지만
+    now = time.time()
+    _client_logs[:] = [t for t in _client_logs if now - t < 60]
+    if len(_client_logs) >= 60:
+        return {'ok': False}
+    _client_logs.append(now)
     body = (await request.body())[:2000].decode('utf-8', 'replace')
     print(f'[client {request.client.host if request.client else "?"}] {body}', flush=True)
     return {'ok': True}
