@@ -24,7 +24,10 @@ from . import config, frame, records, storage
 _lock = threading.Lock()
 _jobs = {}            # (sid, 효과 id) -> 'pending' | 'failed' | 'limit'
 _sem = None           # 동시에 보내는 API 요청 수
-_day = {'date': None, 'count': 0}
+_day = {'date': None, 'count': 0, 'cost': 0.0}
+# 하루 사용량은 파일에 남긴다. 서버를 다시 켜도 상한(비용 안전장치)이 0부터 다시 세지 않도록
+_USAGE = config.OUT_DIR / 'gpt_usage.json'
+_loaded = False
 _tasks = set()        # 돌고 있는 작업 (가비지 컬렉션에 사라지지 않도록 붙잡아 둔다)
 
 
@@ -57,22 +60,54 @@ def status(sid):
     return out
 
 
+def _today():
+    """오늘 사용량을 맞춰 둔다 (_lock 안에서 부른다)."""
+    global _loaded
+    today = datetime.date.today()
+    if not _loaded:
+        _loaded = True
+        try:
+            d = json.loads(_USAGE.read_text(encoding='utf-8'))
+            if d.get('date') == str(today):
+                _day.update(date=today, count=int(d['count']), cost=float(d['cost']))
+        except (OSError, ValueError, KeyError):
+            pass
+    if _day['date'] != today:
+        _day.update(date=today, count=0, cost=0.0)
+
+
+def _save():
+    try:
+        _USAGE.write_text(json.dumps({'date': str(_day['date']), 'count': _day['count'],
+                                      'cost': round(_day['cost'], 4)}), encoding='utf-8')
+    except OSError:
+        pass
+
+
 def _spend(n):
     """오늘 쓸 수 있는 만큼 남았으면 n장을 미리 잡는다."""
-    today = datetime.date.today()
     with _lock:
-        if _day['date'] != today:
-            _day.update(date=today, count=0)
+        _today()
         if _day['count'] + n > config.GPT_DAILY:
             return False
         _day['count'] += n
+        _save()
         return True
 
 
 def usage():
     with _lock:
-        return {'today': _day['count'] if _day['date'] == datetime.date.today() else 0,
-                'limit': config.GPT_DAILY}
+        _today()
+        return {'today': _day['count'], 'limit': config.GPT_DAILY, 'cost': round(_day['cost'], 3)}
+
+
+def _cost(u):
+    """응답의 실제 사용 토큰으로 이번 요청 비용(달러)을 셈한다."""
+    p = config.GPT_PRICE
+    d = u.get('input_tokens_details') or {}
+    text = d.get('text_tokens', 0)
+    image = d.get('image_tokens', max(0, u.get('input_tokens', 0) - text))
+    return (text * p['text'] + image * p['image'] + u.get('output_tokens', 0) * p['output']) / 1e6
 
 
 def request(sid, fx):
@@ -171,11 +206,27 @@ def _edit(path, prompt):
         {'image': ('photo.jpg', jpg, 'image/jpeg')})
     req = urllib.request.Request('https://api.openai.com/v1/images/edits', data=body, headers={
         'Authorization': f'Bearer {config.OPENAI_KEY}', 'Content-Type': ctype})
-    try:
-        with urllib.request.urlopen(req, timeout=config.GPT_TIMEOUT) as r:
-            res = json.loads(r.read())
-    except urllib.error.HTTPError as e:  # 키·요금·내용 검사 같은 이유가 로그에 남도록
-        raise RuntimeError(f'HTTP {e.code} {e.read()[:300]!r}') from None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=config.GPT_TIMEOUT) as r:
+                res = json.loads(r.read())
+            break
+        except urllib.error.HTTPError as e:
+            # 요청이 몰려 '잠시 뒤에'(429)나 서버 쪽 오류(5xx)면 조금 쉬었다가 다시 보낸다
+            if e.code in (429, 500, 502, 503) and attempt < 2:
+                wait = float(e.headers.get('retry-after') or 0) or 5 * (attempt + 1)
+                print(f'[효과] HTTP {e.code}, {wait:.0f}초 뒤 다시 보냄', flush=True)
+                time.sleep(min(wait, 30))
+                continue
+            # 키·요금·내용 검사 같은 이유가 로그에 남도록
+            raise RuntimeError(f'HTTP {e.code} {e.read()[:300]!r}') from None
+    u = res.get('usage') or {}
+    cost = _cost(u)
+    with _lock:
+        _today()
+        _day['cost'] += cost
+        _save()
+    print(f'[효과] 토큰 입력 {u.get("input_tokens")} · 출력 {u.get("output_tokens")} → ${cost:.4f}', flush=True)
     data = base64.b64decode(res['data'][0]['b64_json'])
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
     img = cv2.resize(img, (config.SHOT_W, config.SHOT_H), interpolation=cv2.INTER_CUBIC)

@@ -32,6 +32,7 @@ services:
       YS_AI_KEY: ${YS_AI_KEY:-}
       # 휴대폰 'AI로 바꿔 보기' 버튼(GPT 이미지 편집, 유료). 키가 없으면 버튼이 안 보인다
       YS_OPENAI_KEY: ${YS_OPENAI_KEY:-}
+      OPENAI_KEY: ${OPENAI_KEY:-}            # 같은 키를 이 이름으로 넣어도 된다
       YS_GPT_MODEL: ${YS_GPT_MODEL:-}
       YS_GPT_QUALITY: ${YS_GPT_QUALITY:-}
       YS_GPT_DAILY: ${YS_GPT_DAILY:-}

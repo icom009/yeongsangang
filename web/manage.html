@@ -238,8 +238,12 @@
     const s = await api('/api/manage/status');
     state.mail = s.mail;
     const ai = s.ai.engine === 'off' ? 'AI 꺼짐' : `AI 대기 ${s.ai.waiting}${s.ai.running ? '+1' : ''}`;
+    // GPT 효과: 오늘 만든 장수와 실제 사용 토큰으로 셈한 금액 (1달러 = 1,400원으로 어림)
+    const gpt = s.gpt && s.gpt.on
+      ? ` · GPT 오늘 <b>${s.gpt.today}</b>/${s.gpt.limit}장 $${s.gpt.cost.toFixed(2)} (약 ${Math.round(s.gpt.cost * 1400).toLocaleString()}원)`
+      : '';
     $('#sum').innerHTML = `전체 <b>${s.total}</b>장 · 오늘 <b>${s.today}</b>장`
-      + ` · <span class="load">합성 ${s.compose.busy}/${s.compose.slots} · ${ai}</span>`;
+      + ` · <span class="load">합성 ${s.compose.busy}/${s.compose.slots} · ${ai}</span>${gpt}`;
     $('#sum').hidden = false;
     $('#search').hidden = false;
   }

@@ -72,12 +72,15 @@ AI_SIZE = int(os.environ.get('YS_AI_SIZE', 640))
 # 빛 보정(로컬 IC-Light)은 무료라 촬영마다 저절로 만들고, 아래 효과들은 누를 때만 GPT로 만든다(유료).
 # 표정은 살리도록 지시하지만 그림 자체가 바뀌므로 얼굴이 조금 달라질 수 있다. 원본은 항상 함께 준다.
 # 키가 없으면 효과 버튼이 아예 안 보인다. 넣으면 얼굴 사진이 OpenAI로 나가므로 부스에 안내 문구가 뜬다
-OPENAI_KEY = os.environ.get('YS_OPENAI_KEY', '')
+OPENAI_KEY = (os.environ.get('YS_OPENAI_KEY') or os.environ.get('OPENAI_KEY')
+              or os.environ.get('OPENAI_API_KEY') or '')
+# 비용 계산용 단가(달러, 100만 토큰당). gpt-image-2 기준: 글 입력 5, 사진 입력 8, 그림 출력 30
+GPT_PRICE = {'text': 5.0, 'image': 8.0, 'output': 30.0}
 GPT_MODEL = os.environ.get('YS_GPT_MODEL') or 'gpt-image-2'
 GPT_QUALITY = os.environ.get('YS_GPT_QUALITY') or 'medium'  # low | medium | high
 GPT_SIZE = '1024x768'  # 사진과 같은 4:3. gpt-image-2는 16의 배수면 어떤 크기든 받는다
 GPT_DAILY = int(os.environ.get('YS_GPT_DAILY') or 500)  # 하루 최대 생성 장수 (비용 상한, 네 컷은 4장)
-GPT_PARALLEL = max(1, int(os.environ.get('YS_GPT_PARALLEL') or 3))  # 동시에 보내는 요청 수
+GPT_PARALLEL = max(1, int(os.environ.get('YS_GPT_PARALLEL') or 4))  # 동시에 보내는 요청 수 (네 컷을 한 번에)
 GPT_TIMEOUT = float(os.environ.get('YS_GPT_TIMEOUT') or 150)
 
 _KEEP = ('Keep every person\'s face, identity, facial expression, hairstyle, skin tone and clothing '
