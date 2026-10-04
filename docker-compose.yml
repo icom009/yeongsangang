@@ -14,6 +14,13 @@
 #   방문객은 같은 공유기 Wi-Fi에 붙어 QR을 연다 (현장에서 받아 가야 한다)
 #
 # 이미지는 인터넷이 되는 곳에서 미리 빌드해 둘 것 (모델·미리보기 파일을 빌드 때 내려받는다)
+# 로그는 서비스마다 20MB x 5개까지만 남긴다 (축제 내내 쌓여 디스크를 채우지 않게)
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   booth:
     build: .
@@ -45,6 +52,14 @@ services:
       YS_SMTP_FROM: ${YS_SMTP_FROM:-}
     volumes:
       - ./output:/app/output   # 사진은 컨테이너를 지워도 남도록 이 폴더에 저장
+    logging: *logging
+    # 응답이 없으면 docker ps에 unhealthy로 보인다 (모델을 올리는 처음 1~2분은 봐준다)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/config', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
   tunnel:
     image: cloudflare/cloudflared:latest
@@ -53,6 +68,7 @@ services:
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    logging: *logging
     depends_on:
       - booth
 
@@ -70,6 +86,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data       # 발급받은 인증서 (지우면 다시 발급, 너무 자주면 발급 제한에 걸린다)
       - caddy_config:/config
+    logging: *logging
     depends_on:
       - booth
 

@@ -3,6 +3,7 @@ import contextlib
 import hashlib
 import hmac
 import html
+import logging
 import mimetypes
 import os
 import secrets
@@ -47,6 +48,16 @@ async def lifespan(_):
     for task in tasks:
         task.cancel()
 
+
+class _QuietPolls(logging.Filter):
+    """휴대폰이 2초마다 묻는 AI 상태 확인과 관리 화면의 10초 새로 고침은 접근 기록에 남기지 않는다.
+    축제 내내 남기면 로그가 금방 수백 MB가 된다. 촬영·완성·오류 같은 기록은 그대로 남는다."""
+    def filter(self, record):
+        msg = record.getMessage()
+        return not (('GET /p/' in msg and '/ai HTTP' in msg) or 'GET /api/manage/status' in msg)
+
+
+logging.getLogger('uvicorn.access').addFilter(_QuietPolls())
 
 app = FastAPI(title='영산강 AI 포토부스', lifespan=lifespan, docs_url=None, redoc_url=None)
 # 인터넷(터널·공개 주소)으로 들어온 요청은 방문객 받기 화면에 필요한 것만 연다.
@@ -184,21 +195,35 @@ _compose_gate = asyncio.Semaphore(config.COMPOSE_SLOTS)
 _busy = 0  # 지금 합성 중이거나 차례를 기다리는 사진 수 (관리 화면에 보여 준다)
 
 
+def _save_shot(sid, styled, plain):
+    q = [cv2.IMWRITE_JPEG_QUALITY, 93]
+    cv2.imwrite(str(storage.path(sid, 'shot')), styled, q)
+    cv2.imwrite(str(storage.path(sid, 'plain')), plain, q)
+
+
+# 합성을 기다리는 사진이 이보다 많으면 정중히 거절한다. 기다리는 사진마다 메모리를 들고 있어서
+# (공개 주소라 누가 마구 보내도) 서버가 메모리로 무너지지 않게 한다
+MAX_WAITING = config.COMPOSE_SLOTS * 8
+
+
 @app.post('/api/shots')
 async def create_shot(photo: UploadFile = File(...), bg: int = Form(...)):
+    global _busy
     if bg not in config.BG_IDS:
         raise HTTPException(400, '배경을 다시 골라 주세요.')
+    if _busy >= MAX_WAITING:
+        raise HTTPException(503, '찍는 분들이 많아요. 잠시 뒤 다시 찍어 주세요.')
     ai.note_activity()  # 촬영 중에는 로컬 AI가 GPU를 쓰지 않는다
     t0 = time.perf_counter()
     data = await photo.read(MAX_UPLOAD + 1)
     if len(data) > MAX_UPLOAD:
         raise HTTPException(413, '사진 용량이 너무 커요.')
-    img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    # 디코딩·저장은 이벤트 루프 밖에서 (안에서 하면 한 장마다 0.3초씩 다른 요청이 모두 멈췄다)
+    img = await asyncio.to_thread(cv2.imdecode, np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         raise HTTPException(400, '사진을 읽지 못했어요. 다시 찍어 주세요.')
     t1 = time.perf_counter()
 
-    global _busy
     _busy += 1
     try:
         async with _compose_gate:
@@ -207,9 +232,7 @@ async def create_shot(photo: UploadFile = File(...), bg: int = Form(...)):
         _busy -= 1
     t2 = time.perf_counter()
     sid = storage.new_id()
-    q = [cv2.IMWRITE_JPEG_QUALITY, 93]
-    cv2.imwrite(str(storage.path(sid, 'shot')), styled, q)
-    cv2.imwrite(str(storage.path(sid, 'plain')), plain, q)
+    await asyncio.to_thread(_save_shot, sid, styled, plain)
     # 현장에서 느려질 때 어디가 느린지 바로 보이도록 (받기 = 업로드 읽기·디코딩)
     print(f'[촬영] {sid} 받기 {t1 - t0:.2f}초 · 합성 {t2 - t1:.2f}초 · 저장 '
           f'{time.perf_counter() - t2:.2f}초 · {len(data) // 1024}KB', flush=True)
@@ -323,6 +346,9 @@ def manage_page():
 async def manage_login(body: LoginBody, request: Request):
     ip = request.client.host if request.client else '?'
     now = time.time()
+    if len(_manage_tries) > 1000:  # 오래된 기록은 버린다
+        for k in [k for k, v in _manage_tries.items() if not v or now - v[-1] > 300]:
+            _manage_tries.pop(k, None)
     hits = [t for t in _manage_tries.get(ip, []) if now - t < 300]
     if len(hits) >= 10:  # 비밀번호 무차별 대입 막기
         raise HTTPException(429, '시도가 너무 많아요. 5분 뒤에 다시 해 주세요.')
@@ -427,9 +453,18 @@ async def photo_effect(sid: str, fx: str):  # async: 뒤에서 돌 작업을 이
     return JSONResponse(effects.request(sid, fx), headers=NO_STORE)
 
 
+_phone_logs = []
+
+
 @app.post('/p/log')
 async def phone_log(request: Request):
-    """휴대폰 받기 화면의 스크립트 오류 (어떤 브라우저에서 멈췄는지 보려고). 공개 주소라 짧게만 남긴다."""
+    """휴대폰 받기 화면의 스크립트 오류 (어떤 브라우저에서 멈췄는지 보려고). 공개 주소라 짧게,
+    1분에 60건까지만 남긴다 (누가 마구 보내도 로그가 넘치지 않게)."""
+    now = time.time()
+    _phone_logs[:] = [t for t in _phone_logs if now - t < 60]
+    if len(_phone_logs) >= 60:
+        return {'ok': False}
+    _phone_logs.append(now)
     body = (await request.body())[:1200].decode('utf-8', 'replace')
     print(f'[휴대폰] {body}', flush=True)
     return {'ok': True}

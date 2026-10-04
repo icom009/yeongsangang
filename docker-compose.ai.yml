@@ -18,6 +18,11 @@ services:
       IC_CFG: ${IC_CFG:-2.0}
     volumes:
       - ai_cache:/cache     # 모델 약 6GB. 지우면 다시 내려받는다
+    logging:                # 로그는 20MB x 5개까지만
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     deploy:
       resources:
         reservations:

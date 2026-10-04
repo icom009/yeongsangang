@@ -73,6 +73,12 @@ def status(sid):
     return out
 
 
+def _trim(d, keep=5000):
+    """오래된 것부터 버린다 (_lock 안에서 부른다). 축제 내내 쌓여도 메모리가 늘지 않게."""
+    while len(d) > keep:
+        d.pop(next(iter(d)))
+
+
 def _step(sid, fx, stage=None, drawn=0, done=0):
     """진행 상황을 한 칸 옮긴다. 네 컷은 네 장을 다 그려야 '마무리'로 넘어간다."""
     with _lock:
@@ -152,6 +158,8 @@ def request(sid, fx):
             _jobs[(sid, fx)] = 'max'
             return {'state': 'max'}
         _tries[(sid, fx)] = _tries.get((sid, fx), 0) + 1
+        _trim(_tries)
+        _trim(_jobs)
     rec = records.get(sid)
     if rec is None or not storage.path(sid, 'final').exists():
         return {'state': 'missing'}
