@@ -121,8 +121,10 @@ def _need(sid, kind):
 
 
 @app.get('/', response_class=HTMLResponse)
-def index():
-    return FileResponse(config.WEB_DIR / 'index.html', headers=NO_STORE)
+def index(request: Request):
+    # 미리보기(카카오톡 등)는 썸네일 주소가 완전한 주소여야 해서, 이 서버의 바깥 주소를 넣어 준다
+    page = (config.WEB_DIR / 'index.html').read_text(encoding='utf-8')
+    return HTMLResponse(page.replace('{{BASE}}', base_url(request)), headers=NO_STORE)
 
 
 @app.get('/api/config')
@@ -434,8 +436,9 @@ async def phone_log(request: Request):
 
 
 @app.get('/p/{sid}', response_class=HTMLResponse)
-def photo_page(sid: str):
+def photo_page(sid: str, request: Request):
     page = (config.WEB_DIR / 'photo.html').read_text(encoding='utf-8')
+    page = page.replace('{{BASE}}', base_url(request))
     ok = storage.valid_id(sid) and storage.path(sid, 'final').exists()
     page = page.replace('{{SID}}', html.escape(sid if ok else ''))
     page = page.replace('{{STATE}}', 'ready' if ok else 'missing')

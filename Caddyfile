@@ -6,13 +6,30 @@
 
 	# 검색엔진에 올라가지 않게 한다 (방문객 사진 주소가 검색되면 안 된다)
 	header X-Robots-Tag "noindex, nofollow, noarchive"
-	respond /robots.txt "User-agent: *
+	# 링크 미리보기 봇(카카오톡·문자·메신저)만 들어오게 하고 검색 로봇은 막는다
+	respond /robots.txt "User-agent: kakaotalk-scrap
+Allow: /
+
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: Twitterbot
+Allow: /
+
+User-agent: Yeti
+Allow: /
+
+User-agent: *
 Disallow: /
 " 200
 
-	# 로봇 막기: 크롤러·스크립트 도구·빈 User-Agent, 그리고 취약점 스캐너가 두드리는 주소
+	# 로봇 막기: 크롤러·스크립트 도구·빈 User-Agent, 그리고 취약점 스캐너가 두드리는 주소.
+	# 단, 주소를 붙여 넣으면 썸네일을 만들러 오는 미리보기 봇은 통과시킨다
+	# (카카오톡 kakaotalk-scrap, 아이메시지·라인·페이스북 facebookexternalhit, 네이버 Yeti 등).
+	# 검색에는 위 X-Robots-Tag(noindex)로 올라가지 않는다
 	@bots {
-		header_regexp User-Agent (?i)(bot|crawl|spider|slurp|scrap|fetch|python|curl|wget|httpx|go-http|java/|okhttp|libwww|axios|node-fetch|headless|phantom|selenium|playwright|puppeteer|scan|nmap|masscan|zgrab|nikto|sqlmap|censys|shodan|semrush|ahrefs|mj12|dotbot|petal|bytespider|gptbot|claudebot|ccbot|perplexity|facebookexternalhit|kakaotalk-scrap)
+		header_regexp User-Agent (?i)(bot|crawl|spider|slurp|scrap|fetch|python|curl|wget|httpx|go-http|java/|okhttp|libwww|axios|node-fetch|headless|phantom|selenium|playwright|puppeteer|scan|nmap|masscan|zgrab|nikto|sqlmap|censys|shodan|semrush|ahrefs|mj12|dotbot|petal|bytespider|gptbot|claudebot|ccbot|perplexity)
+		not header_regexp User-Agent (?i)(kakaotalk-scrap|facebookexternalhit|facebot|twitterbot|slackbot|telegrambot|discordbot|linkedinbot|whatsapp|skypeuripreview|line-poker|yeti)
 	}
 	@noua not header User-Agent *
 	@probes path *.php /wp-* /wordpress* /.env* /.git* /admin* /phpmyadmin* /cgi-bin* /vendor/* /actuator* /xmlrpc* /server-status
