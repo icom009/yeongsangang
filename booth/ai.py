@@ -29,6 +29,7 @@ _engine = None          # None | 'local' | 'api'
 _queue = None           # asyncio.Queue
 _gate = None            # 촬영 합성 자리(main의 세마포어). 손님이 기다리는 쪽을 먼저 보낸다
 _running = None         # 지금 만들고 있는 사진 id
+_last_activity = 0.0    # 마지막으로 촬영이 들어온 시각
 _states = OrderedDict()  # sid -> {'state': pending|ready|failed, 'message': 한마디}
 _MAX_STATES = 256
 _lock = threading.Lock()
@@ -107,13 +108,46 @@ async def _watch():
         await asyncio.sleep(30 if _engine is None else 600)
 
 
-async def _wait_for_idle(limit=30):
-    """촬영 합성이 자리를 다 쓰고 있으면 AI는 잠깐 비켜 준다 (손님이 기다리는 쪽이 먼저).
-    너무 오래 기다리지는 않는다. 계속 밀리면 TTL에 걸려 알아서 버려진다."""
-    for _ in range(int(limit * 2)):
-        if _gate is None or not _gate.locked():
-            return
+def note_activity():
+    """촬영이 들어올 때마다 부른다. 로컬 AI는 부스가 잠깐 한가해진 뒤에만 GPU를 쓴다."""
+    global _last_activity
+    _last_activity = time.time()
+
+
+async def _wait_quiet():
+    """마지막 촬영 뒤 AI_IDLE초가 지날 때까지 기다린다. 네 컷을 찍는 동안(3초 간격)에는
+    AI가 끼어들지 않고, 방문객이 한마디를 쓰는 동안 같은 빈틈에 돈다."""
+    while time.time() - _last_activity < config.AI_IDLE:
         await asyncio.sleep(0.5)
+
+
+async def _take_gpu():
+    """조용해질 때까지 기다렸다가 GPU를 잡는다. 잡는 사이 촬영이 들어왔으면 다시 양보한다."""
+    while True:
+        await _wait_quiet()
+        await _hold_gpu()
+        if time.time() - _last_activity >= config.AI_IDLE:
+            return
+        _free_gpu()
+
+
+async def _hold_gpu():
+    """AI가 GPU를 쓰는 동안에는 촬영 합성이 끼어들지 못하게 촬영 자리를 전부 잡는다.
+
+    같은 GPU를 두 프로세스가 번갈아 쓰면(부스의 onnxruntime + IC-Light) 서로 어마어마하게
+    느려진다. 실측: AI가 도는 동안 촬영 합성이 0.65초 -> 17초. AI 사진을 작게 돌려도 마찬가지였다.
+    그래서 번갈아 쓰지 않고 아예 겹치지 않게 한다. 촬영이 기다리는 시간은 AI 한 장(1~2초)까지다."""
+    if _gate is None:
+        return
+    for _ in range(config.COMPOSE_SLOTS):
+        await _gate.acquire()
+
+
+def _free_gpu():
+    if _gate is None:
+        return
+    for _ in range(config.COMPOSE_SLOTS):
+        _gate.release()
 
 
 async def _worker():
@@ -126,9 +160,19 @@ async def _worker():
                 _mark(job['sid'], 'failed')
                 print(f'[AI] {waited:.0f}초 묵어 건너뜀 {job["sid"]}', flush=True)
                 continue
-            await _wait_for_idle()
+            prep = await asyncio.to_thread(_prepare, job)  # CPU: 크기 줄이기·인코딩
+            # 같은 GPU를 쓰는 로컬 엔진만 비켜서 기다린다. 외부 API는 GPU와 무관하므로 바로 보낸다
+            local = _engine == 'local'
+            if local:
+                await _take_gpu()
             _running = job['sid']
-            await asyncio.to_thread(_run, job)
+            t0 = time.time()
+            try:
+                relit = await asyncio.to_thread(_relight, prep)  # GPU는 이 순간에만 잡는다
+            finally:
+                if local:
+                    _free_gpu()
+            await asyncio.to_thread(_finish, job, prep, relit, time.time() - t0)  # CPU: 빛 옮기기·저장
         except Exception as e:  # 어떤 실패도 촬영 흐름에 영향이 없어야 한다
             _mark(job['sid'], 'failed')
             print(f'[AI] 실패 {job["sid"]}: {e}', flush=True)
@@ -266,34 +310,47 @@ def _ai_size(w, h):
     return max(8, int(w * s) // 8 * 8), max(8, int(h * s) // 8 * 8)
 
 
-def _run(job):
-    sid, bg_id = job['sid'], job['bg']
+def _prepare(job):
+    """AI에 보낼 사진을 준비한다 (CPU만 쓴다)."""
+    bg_id = job['bg']
     plain, alpha8 = job['plain'], job['alpha']
     H, W = plain.shape[:2]
     look = config.BG_BY_ID[bg_id].get('look', {})
-    scene = look.get('ai') or config.BG_BY_ID[bg_id]['place']
-
     w, h = _ai_size(W, H)
     small = _fit(plain, w, h)
-    a_small = _fit(alpha8, w, h)
-    bg = compose.cover(compose.read_image(config.BG_DIR / f'bg_{bg_id}.png'), w, h)
-
-    t0 = time.time()
+    prep = {'small': small, 'w': w, 'h': h, 'look': look, 'engine': _engine,
+            'scene': look.get('ai') or config.BG_BY_ID[bg_id]['place']}
+    q = [cv2.IMWRITE_JPEG_QUALITY, 92]
     if _engine == 'local':
         # IC-Light(배경 맞춤 재조명): 인물(알파 포함)과 배경을 함께 넘긴다
-        fg = cv2.imencode('.png', np.dstack([small, a_small]))[1].tobytes()
-        relit = _call_local(fg, cv2.imencode('.jpg', bg, [cv2.IMWRITE_JPEG_QUALITY, 92])[1].tobytes(),
-                            scene, w, h)
+        bg = compose.cover(compose.read_image(config.BG_DIR / f'bg_{bg_id}.png'), w, h)
+        prep['fg'] = cv2.imencode('.png', np.dstack([small, _fit(alpha8, w, h)]))[1].tobytes()
+        prep['bg'] = cv2.imencode('.jpg', bg, q)[1].tobytes()
     else:
         # 외부 엔진: 이미 합성된 사진을 넘겨 빛만 맞춰 달라고 한다
-        relit = _call_api(cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 92])[1].tobytes(), scene)
+        prep['jpg'] = cv2.imencode('.jpg', small, q)[1].tobytes()
+    return prep
+
+
+def _relight(prep):
+    """엔진을 부른다. 로컬이면 이 동안만 GPU를 쓴다."""
+    if prep['engine'] == 'local':
+        relit = _call_local(prep['fg'], prep['bg'], prep['scene'], prep['w'], prep['h'])
+    else:
+        relit = _call_api(prep['jpg'], prep['scene'])
     if relit is None:
         raise RuntimeError('AI 결과가 비었어요')
+    return relit
+
+
+def _finish(job, prep, relit, took=0.0):
+    """AI 결과에서 빛만 옮겨 저장한다 (CPU만 쓴다)."""
+    sid = job['sid']
+    w, h, look = prep['w'], prep['h'], prep['look']
     if relit.shape[:2] != (h, w):
         relit = cv2.resize(relit, (w, h), interpolation=cv2.INTER_AREA)
-
-    af = alpha8.astype(np.float32) / 255
-    out = apply_light(plain, relit, small, af) / 255
+    af = job['alpha'].astype(np.float32) / 255
+    out = apply_light(job['plain'], relit, prep['small'], af) / 255
     # 인물만 뽀샤시 (배경은 그대로 둔다)
     lit = compose.beautify(out, af, config.BEAUTY, look.get('glow', 0.16), look.get('tint', (0, 0))[1])
     out = np.uint8(np.clip((out + (lit - out) * af[..., None]) * 255 + 0.5, 0, 255))
@@ -303,8 +360,15 @@ def _run(job):
         rec = _states.get(sid) or {}
         rec['state'] = 'ready'
         _states[sid] = rec
-    print(f'[AI] 완료 {sid} ({_engine}, {time.time() - t0:.1f}초)', flush=True)
+    print(f'[AI] 완료 {sid} ({prep["engine"]}, 재조명 {took:.1f}초)', flush=True)
     _finish_ready(sid)  # 이미 완성 화면까지 간 사진이면 프레임 버전도 바로 만든다
+
+
+def _run(job):
+    """세 단계를 한 번에 (시험용)."""
+    prep = _prepare(job)
+    t0 = time.time()
+    _finish(job, prep, _relight(prep), time.time() - t0)
 
 
 # ---------- 엔진 ----------

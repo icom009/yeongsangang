@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from booth import ai, compose, config, frame, mail, records, storage
+from booth import ai, compose, config, effects, frame, mail, records, storage
 
 # 실시간 미리보기 모듈(.mjs)·wasm을 브라우저가 받아들이도록 형식을 명시 (OS마다 기본값이 다르다)
 mimetypes.add_type('text/javascript', '.mjs')
@@ -138,7 +138,9 @@ def get_config():
             'color': config.TEXT_COLOR,
         },
         'defaultMessage': config.DEFAULT_MESSAGE,
-        'ai': ai.info(),
+        # 외부로 사진이 나가는 기능(외부 빛 보정 엔진이나 GPT 효과)이 켜져 있으면 처음 화면에 안내가 뜬다
+        'ai': {**ai.info(), 'external': ai.external() or effects.enabled()},
+        'effects': effects.catalog(),
     }
 
 
@@ -184,12 +186,15 @@ _busy = 0  # 지금 합성 중이거나 차례를 기다리는 사진 수 (관�
 async def create_shot(photo: UploadFile = File(...), bg: int = Form(...)):
     if bg not in config.BG_IDS:
         raise HTTPException(400, '배경을 다시 골라 주세요.')
+    ai.note_activity()  # 촬영 중에는 로컬 AI가 GPU를 쓰지 않는다
+    t0 = time.perf_counter()
     data = await photo.read(MAX_UPLOAD + 1)
     if len(data) > MAX_UPLOAD:
         raise HTTPException(413, '사진 용량이 너무 커요.')
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         raise HTTPException(400, '사진을 읽지 못했어요. 다시 찍어 주세요.')
+    t1 = time.perf_counter()
 
     global _busy
     _busy += 1
@@ -198,10 +203,14 @@ async def create_shot(photo: UploadFile = File(...), bg: int = Form(...)):
             styled, plain, person, alpha = await asyncio.to_thread(compose.compose, img, bg)
     finally:
         _busy -= 1
+    t2 = time.perf_counter()
     sid = storage.new_id()
     q = [cv2.IMWRITE_JPEG_QUALITY, 93]
     cv2.imwrite(str(storage.path(sid, 'shot')), styled, q)
     cv2.imwrite(str(storage.path(sid, 'plain')), plain, q)
+    # 현장에서 느려질 때 어디가 느린지 바로 보이도록 (받기 = 업로드 읽기·디코딩)
+    print(f'[촬영] {sid} 받기 {t1 - t0:.2f}초 · 합성 {t2 - t1:.2f}초 · 저장 '
+          f'{time.perf_counter() - t2:.2f}초 · {len(data) // 1024}KB', flush=True)
     records.note_shot(sid, bg)  # 어떤 장소였는지 기억했다가 '완성하기' 때 이력에 적는다
     ai.submit(sid, plain, alpha, bg)  # AI 버전은 뒤에서 만든다 (여기서 기다리지 않는다)
     return {
@@ -236,6 +245,9 @@ async def finalize(sid: str, body: FinalBody, request: Request):
                     await asyncio.to_thread(shutil.copyfile, plain, p)
         await asyncio.to_thread(frame.render, paths if len(paths) > 1 else shot, body.message, done)
         if len(paths) > 1:
+            # 휴대폰에서 AI 효과를 입힐 때 컷마다 따로 쓰도록 낱장을 대표 id 아래에 남긴다
+            for i, p in enumerate(paths):
+                await asyncio.to_thread(shutil.copyfile, p, storage.path(sid, f'c{i}'))
             # 프레임 없는 4컷도 대표 사진 자리에 합쳐 둔다
             await asyncio.to_thread(frame.save_grid, paths, shot)
         # 고르지 않은 쪽 사진과 합쳐진 낱장은 더 쓸 일이 없으니 바로 지운다 (용량·개인정보)
@@ -244,7 +256,7 @@ async def finalize(sid: str, body: FinalBody, request: Request):
         for i in ids[1:]:
             storage.path(i, 'shot').unlink(missing_ok=True)
         ai.note_final(sid, body.message, cut_ids)  # AI 버전도 같은 한마디로 프레임에 담는다
-        records.add(sid, body.message, body.filter, len(paths))  # 관리 화면 이력
+        records.add(sid, body.message, body.filter, ids)  # 관리 화면 이력 (AI 효과도 이걸 보고 만든다)
     return {
         'id': sid,
         'final': f'/media/{sid}/final.jpg',
@@ -259,7 +271,11 @@ def media(sid: str, kind: str, download: int = 0):
     headers = dict(LONG_CACHE)
     if download:
         name = {'final': 'yeongsangang_frame.jpg', 'aifinal': 'yeongsangang_ai_frame.jpg',
-                'ai': 'yeongsangang_ai.jpg'}.get(kind, 'yeongsangang_photo.jpg')
+                'ai': 'yeongsangang_ai.jpg'}.get(kind)
+        if name is None:  # AI 효과 사진: fxf_webtoon -> yeongsangang_webtoon_frame.jpg
+            fx = kind.split('_', 1)[-1]
+            name = (f'yeongsangang_{fx}_frame.jpg' if kind.startswith('fxf_') else
+                    f'yeongsangang_{fx}.jpg' if kind.startswith('fx_') else 'yeongsangang_photo.jpg')
         headers['Content-Disposition'] = f'attachment; filename="{name}"'
     return FileResponse(p, media_type=JPEG, headers=headers)
 
@@ -335,6 +351,7 @@ def manage_status(request: Request):
         'ai': ai.queue_info(),
         'mail': config.mail_ready(),
         'keepHours': config.KEEP_HOURS,
+        'gpt': {**effects.usage(), 'on': effects.enabled()},
     }
 
 
@@ -354,6 +371,7 @@ def manage_shots(request: Request, offset: int = 0, limit: int = 40, q: str = ''
         items.append({**r,
                       'alive': ok and storage.path(sid, 'final').exists(),
                       'ai': ok and storage.path(sid, 'aifinal').exists(),
+                      'fx': [fx for fx in config.EFFECT_IDS if ok and storage.path(sid, f'fxf_{fx}').exists()],
                       'final': f'/media/{sid}/final.jpg',
                       'shot': f'/media/{sid}/shot.jpg',
                       'qr': f'/api/shots/{sid}/qr.png',
@@ -392,10 +410,19 @@ async def manage_mail(sid: str, body: MailBody, request: Request):
 
 @app.get('/p/{sid}/ai')
 def photo_ai(sid: str):
-    """AI 빛 보정 버전이 준비됐는지. 휴대폰 받기 화면이 물어본다 (인터넷에서도 열리도록 /p/ 아래에 둔다)."""
+    """AI 빛 보정과 AI 효과가 준비됐는지. 휴대폰 받기 화면이 물어본다 (인터넷에서도 열리도록 /p/ 아래에 둔다)."""
     if not storage.valid_id(sid):
         raise HTTPException(404)
-    return JSONResponse(ai.status(sid), headers=NO_STORE)
+    return JSONResponse({**ai.status(sid), 'effects': effects.status(sid), 'catalog': effects.catalog()},
+                        headers=NO_STORE)
+
+
+@app.post('/p/{sid}/fx/{fx}')
+async def photo_effect(sid: str, fx: str):  # async: 뒤에서 돌 작업을 이 이벤트 루프에 올린다
+    """휴대폰에서 AI 효과 버튼을 눌렀을 때. 누를 때만 만들고, 같은 사진·같은 효과는 한 번만 만든다."""
+    if not storage.valid_id(sid) or not storage.path(sid, 'final').exists():
+        raise HTTPException(404, '사진을 찾을 수 없어요.')
+    return JSONResponse(effects.request(sid, fx), headers=NO_STORE)
 
 
 @app.get('/p/{sid}', response_class=HTMLResponse)

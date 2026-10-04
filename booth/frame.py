@@ -36,6 +36,11 @@ def _rounded_mask(size, r):
     return m
 
 
+def _open(p):
+    """파일 경로든 이미 열린 그림이든 RGB 그림으로."""
+    return p.convert('RGB') if isinstance(p, Image.Image) else Image.open(p).convert('RGB')
+
+
 def _fit(img, w, h):
     """비율을 지킨 채 가운데를 잘라 (w, h)에 꽉 맞춘다."""
     s = max(w / img.width, h / img.height)
@@ -61,7 +66,7 @@ def grid(paths, w=config.SHOT_W, h=config.SHOT_H, bg=(244, 252, 255)):
     out = Image.new('RGB', (w, h), bg)
     cw, ch = (w - g) // 2, (h - g) // 2
     for i, p in enumerate(list(paths)[:4]):
-        out.paste(_fit(Image.open(p).convert('RGB'), cw, ch), ((i % 2) * (cw + g), (i // 2) * (ch + g)))
+        out.paste(_fit(_open(p), cw, ch), ((i % 2) * (cw + g), (i // 2) * (ch + g)))
     return out
 
 
@@ -72,13 +77,13 @@ def save_grid(paths, out_path):
 
 
 def render(shots, message, out_path):
-    """shots: 사진 경로 하나(1컷) 또는 네 개(4컷)."""
-    paths = [shots] if isinstance(shots, (str, Path)) else list(shots)
+    """shots: 사진 하나(1컷) 또는 네 개(4컷). 파일 경로나 이미 열린 그림."""
+    paths = [shots] if isinstance(shots, (str, Path, Image.Image)) else list(shots)
     frame = Image.open(config.FRAME).convert('RGB')
     boxes = cells(len(paths))
     radius = config.FRAME_HOLE_RADIUS if len(paths) == 1 else max(6, config.FRAME_HOLE_RADIUS // 2)
     for p, (x, y, w, h) in zip(paths, boxes):
-        frame.paste(_fit(Image.open(p).convert('RGB'), w, h), (x, y), _rounded_mask((w, h), radius))
+        frame.paste(_fit(_open(p), w, h), (x, y), _rounded_mask((w, h), radius))
 
     lines = clean_message(message)
     bx1, by1, bx2, by2 = config.FRAME_TEXT_BOX

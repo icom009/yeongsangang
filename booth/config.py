@@ -58,8 +58,52 @@ AI_TIMEOUT = float(os.environ.get('YS_AI_TIMEOUT', 120))
 AI_QUEUE = max(1, int(os.environ.get('YS_AI_QUEUE', 8)))
 # 대기줄에서 이만큼(초) 넘게 묵은 작업은 건너뛴다 (방문객이 이미 사진을 받아 갔다)
 AI_TTL = float(os.environ.get('YS_AI_TTL', 180))
-# AI에 넣는 사진 크기(긴 변). SD1.5 기반이라 1024쯤이 알맞다
-AI_SIZE = int(os.environ.get('YS_AI_SIZE', 1024))
+# 로컬 AI는 마지막 촬영 뒤 이만큼(초) 조용해야 GPU를 쓴다. 같은 GPU를 촬영 합성과 나눠 쓰면
+# 둘 다 몇 배씩 느려지기 때문이다 (네 컷 촬영 간격 3초보다 길게)
+AI_IDLE = float(os.environ.get('YS_AI_IDLE', 6))
+# AI에 넣는 사진 크기(긴 변). 결과에서 '빛'만 뽑아 쓰므로 작아도 거의 차이가 없고,
+# GPU를 짧게 쓸수록 촬영이 덜 기다린다 (640이면 한 장 약 1.6초)
+AI_SIZE = int(os.environ.get('YS_AI_SIZE', 640))
+
+# ---------- AI 효과 버튼 (GPT 이미지 편집, 선택 기능) ----------
+# 빛 보정(로컬 IC-Light)은 무료라 촬영마다 저절로 만들고, 아래 효과들은 누를 때만 GPT로 만든다(유료).
+# 표정은 살리도록 지시하지만 그림 자체가 바뀌므로 얼굴이 조금 달라질 수 있다. 원본은 항상 함께 준다.
+# 키가 없으면 효과 버튼이 아예 안 보인다. 넣으면 얼굴 사진이 OpenAI로 나가므로 부스에 안내 문구가 뜬다
+OPENAI_KEY = os.environ.get('YS_OPENAI_KEY', '')
+GPT_MODEL = os.environ.get('YS_GPT_MODEL') or 'gpt-image-2'
+GPT_QUALITY = os.environ.get('YS_GPT_QUALITY') or 'medium'  # low | medium | high
+GPT_SIZE = '1024x768'  # 사진과 같은 4:3. gpt-image-2는 16의 배수면 어떤 크기든 받는다
+GPT_DAILY = int(os.environ.get('YS_GPT_DAILY') or 500)  # 하루 최대 생성 장수 (비용 상한, 네 컷은 4장)
+GPT_PARALLEL = max(1, int(os.environ.get('YS_GPT_PARALLEL') or 3))  # 동시에 보내는 요청 수
+GPT_TIMEOUT = float(os.environ.get('YS_GPT_TIMEOUT') or 150)
+
+_KEEP = ('Keep every person\'s face, identity, facial expression, hairstyle, skin tone and clothing '
+         'exactly as they are, and keep the same number of people. ')
+EFFECTS = [
+    {'id': 'scene', 'name': 'AI 장면 연출', 'desc': '표정은 그대로, 그곳에 어울리는 동작으로',
+     'prompt': 'Edit this photo. ' + _KEEP + 'Change only their body poses and gestures so they naturally '
+               'belong in this place: {act}. Keep the background location, light the people with the same '
+               'light as the scene, and keep it a natural, photorealistic photograph.'},
+    {'id': 'watercolor', 'name': '수채화 동화', 'desc': '부드러운 수채화 그림책처럼',
+     'prompt': 'Turn this photo into a soft, hand-painted watercolor storybook illustration with gentle washes '
+               'and paper texture. Keep the same composition and scenery, and keep the same people with '
+               'recognizable faces, the same facial expressions, poses and clothing colors.'},
+    {'id': 'webtoon', 'name': '웹툰', 'desc': '밝고 깔끔한 웹툰 그림체로',
+     'prompt': 'Redraw this photo as a clean, bright Korean webtoon-style illustration with crisp line art and '
+               'soft cel shading. Keep the same composition and scenery, and keep the same people with '
+               'recognizable faces, the same facial expressions, poses and clothing.'},
+    {'id': 'film', 'name': '필름 사진', 'desc': '90년대 필름 카메라 느낌으로',
+     'prompt': 'Make this photo look like a warm vintage 35mm film photograph from the 1990s: soft film grain, '
+               'gently faded colors and a faint light leak. ' + _KEEP + 'Keep the poses and the composition '
+               'exactly the same.'},
+]
+EFFECT_IDS = [e['id'] for e in EFFECTS]
+EFFECT_BY_ID = {e['id']: e for e in EFFECTS}
+
+
+def gpt_ready():
+    return bool(OPENAI_KEY)
+
 
 # 관리 화면(/manage) 비밀번호. 사진 이력을 보고 다시 보내는 곳이라 현장에서 꼭 바꿔 쓰세요
 # (compose가 빈 값을 넘길 수 있으므로 비어 있으면 기본값으로 되돌린다. 빈 비밀번호는 절대 두지 않는다)
@@ -94,40 +138,41 @@ DEFAULT_MESSAGE = '오늘도 함께 행복하자'
 # look: 그 장소의 빛에 맞춘 자동 필터. sun은 원본 배경 이미지 안 해의 위치(0~1, 화면 밖이면 음수·1 초과),
 #       tint는 인물에 비치는 빛 색(LAB a·b 더하기), exposure는 인물 밝기 조정,
 #       rim은 해 쪽 인물 가장자리에 비치는 빛의 세기, glow는 뽀샤시 정도, preview는 PC 미리보기용 CSS 필터,
-#       ai는 생성형 AI 빛 보정에 넘기는 장면 설명(영어, booth/ai.py)
+#       ai는 생성형 AI 빛 보정에 넘기는 장면 설명(영어, booth/ai.py),
+#       act는 'AI 장면 연출'에서 사람들이 그곳에 어울리게 취할 동작(영어, booth/effects.py)
 BACKGROUNDS = [
     {'id': 1, 'name': '황포돛배와 영산강 노을', 'place': '영산포 나루',
      'story': '흑산도 홍어와 남도의 곡식을 싣고 영산강을 오르내리던 황포돛배. '
               '해 질 무렵 누런 돛이 노을빛으로 물드는 영산포 나루의 저녁이에요.',
-     'look': {'name': '노을빛', 'sun': (0.83, 0.45), 'rim': 0.6, 'glow': 0.22, 'tint': (5, 12), 'exposure': -4, 'ai': 'golden hour sunset over a wide river, warm orange backlight, soft glowing rim light', 'preview': 'brightness(0.98) saturate(1.15) sepia(0.22)'}},
+     'look': {'name': '노을빛', 'sun': (0.83, 0.45), 'rim': 0.6, 'glow': 0.22, 'tint': (5, 12), 'exposure': -4, 'act': 'standing together on the riverside dock at sunset, waving toward the yellow-sailed boat', 'ai': 'golden hour sunset over a wide river, warm orange backlight, soft glowing rim light', 'preview': 'brightness(0.98) saturate(1.15) sepia(0.22)'}},
     {'id': 2, 'name': '느러지 한반도 물돌이', 'place': '나주 동강면 느러지',
      'story': '강물이 크게 휘돌아 흐르며 한반도를 닮은 땅을 빚어낸 곳. '
               '전망대에 오르면 영산강이 그린 지도가 한눈에 내려다보여요.',
-     'look': {'name': '한낮 햇살', 'sun': (0.5, -0.4), 'tint': (0, 2), 'exposure': 2, 'rim': 0.2, 'glow': 0.12, 'ai': 'bright midday sunlight over a wide river bend, clear sky, soft natural daylight', 'preview': 'brightness(1.06) saturate(1.12) contrast(1.04)'}},
+     'look': {'name': '한낮 햇살', 'sun': (0.5, -0.4), 'tint': (0, 2), 'exposure': 2, 'rim': 0.2, 'glow': 0.12, 'act': 'standing at a hilltop viewpoint railing, pointing at the winding river below and smiling', 'ai': 'bright midday sunlight over a wide river bend, clear sky, soft natural daylight', 'preview': 'brightness(1.06) saturate(1.12) contrast(1.04)'}},
     {'id': 3, 'name': '푸른 영산강 풍경', 'place': '나주 들녘',
      'story': '너른 나주 들판 사이로 느릿하게 흐르는 영산강. '
               '맑은 날이면 강물에 하늘과 구름이 그대로 담겨요.',
-     'look': {'name': '맑은 하늘', 'sun': (0.5, -0.4), 'tint': (0, 2), 'exposure': 2, 'rim': 0.2, 'glow': 0.12, 'ai': 'sunny day beside a calm wide river, clear blue sky, soft natural daylight', 'preview': 'brightness(1.06) saturate(1.12) contrast(1.04)'}},
+     'look': {'name': '맑은 하늘', 'sun': (0.5, -0.4), 'tint': (0, 2), 'exposure': 2, 'rim': 0.2, 'glow': 0.12, 'act': 'strolling along the grassy riverbank side by side, relaxed and cheerful', 'ai': 'sunny day beside a calm wide river, clear blue sky, soft natural daylight', 'preview': 'brightness(1.06) saturate(1.12) contrast(1.04)'}},
     {'id': 4, 'name': '영산강 빛의 산책로', 'place': '영산강 수변',
      'story': '해가 지면 다리와 물가 산책로에 하나둘 불이 켜지고 강물 위로 빛이 길게 번져요. '
               '저녁 산책길의 반짝이는 순간이에요.',
-     'look': {'name': '노을빛', 'sun': (0.87, 0.33), 'rim': 0.55, 'glow': 0.22, 'tint': (5, 12), 'exposure': -4, 'ai': 'evening riverside promenade, warm lamp light glowing, cool blue hour ambience', 'preview': 'brightness(0.98) saturate(1.15) sepia(0.22)'}},
+     'look': {'name': '노을빛', 'sun': (0.87, 0.33), 'rim': 0.55, 'glow': 0.22, 'tint': (5, 12), 'exposure': -4, 'act': 'walking along the softly lit riverside promenade at dusk, leaning close together', 'ai': 'evening riverside promenade, warm lamp light glowing, cool blue hour ambience', 'preview': 'brightness(0.98) saturate(1.15) sepia(0.22)'}},
     {'id': 5, 'name': '영산강 코스모스 정원', 'place': '영산강 둔치',
      'story': '가을바람이 불면 강변을 가득 채우는 분홍빛 코스모스. '
               '꽃 사이에 서면 누구나 가을의 주인공이 돼요.',
-     'look': {'name': '꽃밭 햇살', 'sun': (0.3, -0.3), 'tint': (0, 2), 'exposure': 2, 'rim': 0.2, 'glow': 0.18, 'ai': 'sunny autumn flower field by a river, soft warm afternoon sunlight', 'preview': 'brightness(1.06) saturate(1.12) contrast(1.04)'}},
+     'look': {'name': '꽃밭 햇살', 'sun': (0.3, -0.3), 'tint': (0, 2), 'exposure': 2, 'rim': 0.2, 'glow': 0.18, 'act': 'standing among the cosmos flowers, one person gently holding a flower up to the camera', 'ai': 'sunny autumn flower field by a river, soft warm afternoon sunlight', 'preview': 'brightness(1.06) saturate(1.12) contrast(1.04)'}},
     {'id': 6, 'name': '황포돛배와 영산강', 'place': '영산강 뱃길',
      'story': '푸른 산자락 아래 물살을 가르며 나아가는 황포돛배. '
               '옛 뱃사람들이 오가던 뱃길을 지금도 배를 타고 따라가 볼 수 있어요.',
-     'look': {'name': '강바람 햇살', 'sun': (0.2, -0.3), 'tint': (0, 2), 'exposure': 2, 'rim': 0.2, 'glow': 0.12, 'ai': 'sunny day on a river with green hills, bright natural daylight, light breeze', 'preview': 'brightness(1.06) saturate(1.12) contrast(1.04)'}},
+     'look': {'name': '강바람 햇살', 'sun': (0.2, -0.3), 'tint': (0, 2), 'exposure': 2, 'rim': 0.2, 'glow': 0.12, 'act': 'standing on the riverbank cheering and waving at the passing yellow-sailed boat', 'ai': 'sunny day on a river with green hills, bright natural daylight, light breeze', 'preview': 'brightness(1.06) saturate(1.12) contrast(1.04)'}},
     {'id': 7, 'name': '영산강 양귀비 꽃밭', 'place': '영산강 둔치',
      'story': '봄이 깊어지면 강변이 붉은 양귀비로 물들어요. '
               '강 건너 도시 풍경과 꽃물결이 한 장면에 담기는 곳이에요.',
-     'look': {'name': '꽃밭 햇살', 'sun': (0.5, -0.4), 'tint': (0, 2), 'exposure': 2, 'rim': 0.2, 'glow': 0.16, 'ai': 'bright red poppy field by a river, clear sunny daylight', 'preview': 'brightness(1.06) saturate(1.12) contrast(1.04)'}},
+     'look': {'name': '꽃밭 햇살', 'sun': (0.5, -0.4), 'tint': (0, 2), 'exposure': 2, 'rim': 0.2, 'glow': 0.16, 'act': 'walking through the red poppy field, laughing, one person holding a small bouquet', 'ai': 'bright red poppy field by a river, clear sunny daylight', 'preview': 'brightness(1.06) saturate(1.12) contrast(1.04)'}},
     {'id': 8, 'name': '2026 나주영산강축제', 'place': '축제장 입구',
      'story': '강과 사람이 함께 어우러지는 나주영산강축제. '
               '오늘 우리가 여기 왔다는 걸 오래 기억하도록 축제장 입구에서 한 장 남겨요.',
-     'look': {'name': '축제 햇살', 'sun': (0.5, -0.4), 'tint': (0, 2), 'exposure': 2, 'rim': 0.2, 'glow': 0.14, 'ai': 'sunny outdoor festival entrance, bright cheerful daylight', 'preview': 'brightness(1.06) saturate(1.12) contrast(1.04)'}},
+     'look': {'name': '축제 햇살', 'sun': (0.5, -0.4), 'tint': (0, 2), 'exposure': 2, 'rim': 0.2, 'glow': 0.14, 'act': 'posing joyfully at the festival entrance, raising their hands in celebration', 'ai': 'sunny outdoor festival entrance, bright cheerful daylight', 'preview': 'brightness(1.06) saturate(1.12) contrast(1.04)'}},
 ]
 BG_IDS = {b['id'] for b in BACKGROUNDS}
 BG_BY_ID = {b['id']: b for b in BACKGROUNDS}

@@ -4,7 +4,8 @@ import { sound } from './sound.js';
 const $ = (s) => document.querySelector(s);
 const IDLE_MS = 120_000;      // 아무 조작이 없으면 처음 화면으로
 const TAKE_IDLE_SEC = 90;     // 받기 화면에서 처음으로 돌아가기까지
-const QR_DELAY_MS = 4000;     // 완성 사진을 먼저 감상한 뒤 QR 표시
+const QR_DELAY_MS = 500;      // 완성 사진이 뜬 뒤 QR이 따라 올라오는 짧은 틈
+const CUT_GAP_SEC = 3;        // 네 컷은 3초마다 한 장씩 쉬지 않고 찍는다
 
 // 휴대폰에서 난 오류를 서버 로그로 보낸다 (현장에서 원인 확인용)
 function report(kind, msg) {
@@ -226,6 +227,7 @@ document.addEventListener('visibilitychange', () => {
 function goHome() {
   clearTimeout(idleTimer);
   clearInterval(takeTimer);
+  if ($('#cutGuide').open) $('#cutGuide').close();
   const bgm = $('#bgm');
   bgm.pause();
   live?.stopCamera();
@@ -339,10 +341,18 @@ async function pickPlace(id) {
       stepFocus(1);  // 다음 장소를 펼쳐 준다
       return;
     }
-  } else {
-    state.picks = [id];
+    askFourCuts();  // 찍히는 방식을 먼저 알려 주고 확인받는다
+    return;
   }
+  state.picks = [id];
   startShooting();
+}
+
+function askFourCuts() {
+  const names = state.picks.map((id, i) => `${i + 1}. ${bgInfo(id)?.place || ''}`).join('   ');
+  $('#guidePlaces').textContent = `고른 곳  ${names}`;
+  $('#cutGuide').showModal();
+  resetIdle();
 }
 
 async function startShooting() {
@@ -369,8 +379,8 @@ function stepBg(delta) {
   selectBg(list[(i + delta + list.length) % list.length].id);
 }
 
-async function selectBg(id) {
-  if (state.busy) return;
+async function selectBg(id, force = false) {
+  if (state.busy && !force) return;
   state.bg = id;
   if (state.mode === 4 && state.picks.length === 4) state.picks[state.cutIndex] = id;
   const b = bgInfo(id);
@@ -400,6 +410,7 @@ async function selectBg(id) {
 }
 
 function enterStudio() {
+  if (state.mode === 4) preloadPicks();  // 장소가 바로 바뀌도록
   setReview(false);
   $('#stageHint').hidden = true;
   showCutBadge();
@@ -423,15 +434,9 @@ function setReview(on) {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function shoot() {
-  if (state.busy) return;
-  state.busy = true;
-  clearTimeout(idleTimer);
-  $('#shutterBtn').disabled = true;
-  $('.studio').classList.add('locked');
-
+async function countdown(sec) {
   const cd = $('#countdown');
-  for (let n = state.timer; n > 0; n--) {
+  for (let n = sec; n > 0; n--) {
     cd.textContent = n;
     cd.classList.remove('tick');
     void cd.offsetWidth;
@@ -441,38 +446,82 @@ async function shoot() {
   }
   cd.textContent = '';
   cd.classList.remove('tick');
+}
 
-  let blob;
-  try {
-    blob = await live.capture();
-  } catch (e) {
-    report('capture', e?.message || e);
-    toast('사진을 찍지 못했어요. 다시 찍어 주세요.');
-    return finishShoot(false);
-  }
+function snapEffect() {
   sound.shutter();
   const flash = $('#flash');
   flash.classList.remove('go');
   void flash.offsetWidth;
   flash.classList.add('go');
+}
+
+function sendShot(blob, bg) {
+  const fd = new FormData();
+  fd.append('photo', blob, 'photo.jpg');
+  fd.append('bg', bg);
+  return api('/api/shots', { method: 'POST', body: fd });
+}
+
+// 네 컷에서 장소가 바로 바뀌도록 미리 받아 둔다
+function preloadPicks() {
+  state.picks.forEach((id) => {
+    const b = bgInfo(id);
+    loadImage(`/bg/${id}.jpg`).catch(() => {});
+    if (b?.fg) loadImage(`/bg/${id}_fg.webp`).catch(() => {});
+  });
+}
+
+async function shoot() {
+  if (state.busy) return;
+  state.busy = true;
+  clearTimeout(idleTimer);
+  $('#shutterBtn').disabled = true;
+  $('.studio').classList.add('locked');
+
+  const four = state.mode === 4;
+  const jobs = [];
+  for (let i = 0; i < (four ? 4 : 1); i++) {
+    if (four) {
+      state.cutIndex = i;
+      showCutBadge();
+      if (i > 0) await selectBg(state.picks[i], true);
+    }
+    await countdown(i === 0 ? state.timer : CUT_GAP_SEC);
+    let blob;
+    try {
+      blob = await live.capture();
+    } catch (e) {
+      report('capture', e?.message || e);
+      toast('사진을 찍지 못했어요. 다시 찍어 주세요.');
+      return finishShoot(false);
+    }
+    snapEffect();
+    // 합성은 뒤에서 돌리고 바로 다음 컷으로 넘어간다 (기다리지 않는다)
+    jobs.push(sendShot(blob, four ? state.picks[i] : state.bg));
+  }
   live.freeze();
 
   $('#busy').hidden = false;
-  $('#busyText').textContent = '풍경 속에 자연스럽게 담는 중이에요';
+  $('#busyText').textContent = four
+    ? '네 컷을 풍경 속에 담는 중이에요. 잠시만 기다려 주세요'
+    : '풍경 속에 자연스럽게 담는 중이에요';
+  if (four) {  // 몇 장까지 됐는지 보여 준다
+    let done = 0;
+    jobs.forEach((j) => j.then(() => {
+      done += 1;
+      if (!$('#busy').hidden) $('#busyText').textContent = `${done} / 4장 담았어요. 잠시만 기다려 주세요`;
+    }).catch(() => {}));
+  }
   // 여러 부스에서 한꺼번에 찍으면 서버가 차례로 만든다. 오래 걸리면 기다리는 이유를 알려 준다
   const slow = setTimeout(() => { $('#busyText').textContent = '찍는 분들이 많아 조금 더 걸려요. 곧 완성돼요'; }, 5000);
   try {
-    const fd = new FormData();
-    fd.append('photo', blob, 'photo.jpg');
-    fd.append('bg', state.bg);
-    const res = await api('/api/shots', { method: 'POST', body: fd });
-    state.cuts.push({ id: res.id, shot: res.shot, plain: res.plain, person: res.person });
-    $('#lookName').textContent = res.look;
-    if (!res.person) report('no-person', `bg ${state.bg}`);
-    if (state.mode === 4 && state.cuts.length < 4) {
-      await nextCut();   // 네 컷은 이어서 찍는다
-      return;
-    }
+    const results = await Promise.all(jobs);
+    state.cuts = results.map((r) => ({ id: r.id, shot: r.shot, plain: r.plain, person: r.person }));
+    $('#lookName').textContent = results[0].look;
+    results.forEach((r, i) => {
+      if (!r.person) report('no-person', `bg ${four ? state.picks[i] : state.bg}`);
+    });
     await showResult();
     finishShoot(true);
   } catch (e) {
@@ -482,20 +531,6 @@ async function shoot() {
   } finally {
     clearTimeout(slow);
   }
-}
-
-async function nextCut() {
-  state.cutIndex += 1;
-  $('#busy').hidden = true;
-  $('.studio').classList.remove('locked');
-  $('#shutterBtn').disabled = false;
-  state.busy = false;
-  await selectBg(state.picks[state.cutIndex]);
-  showCutBadge();
-  live.resume();
-  await wait(1800);  // 다음 장소를 보고 자세를 잡을 틈
-  if ($('[data-screen="studio"]').hidden || state.busy) return;
-  shoot();
 }
 
 // 서버(frame.grid)와 같은 배치로 네 컷 미리보기를 만든다
@@ -585,7 +620,7 @@ function retake() {
   state.cutIndex = 0;
   setReview(false);
   showCutBadge();
-  if (state.mode === 4) selectBg(state.picks[0]);
+  if (state.mode === 4) selectBg(state.picks[0], true);
   live.resume();
 }
 
@@ -729,6 +764,12 @@ function bind() {
   document.querySelectorAll('#modeSwitch button').forEach((b) => {
     b.addEventListener('click', () => setMode(Number(b.dataset.mode)));
   });
+  $('#guideGo').addEventListener('click', () => { $('#cutGuide').close(); startShooting(); });
+  $('#guideCancel').addEventListener('click', () => {
+    $('#cutGuide').close();
+    state.picks = [];
+    syncPicks();
+  });
   $('#randomBtn').addEventListener('click', () => {
     const pool = state.cfg.backgrounds.map((b) => b.id);
     state.picks = [];
@@ -736,7 +777,7 @@ function bind() {
       state.picks.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
     }
     syncPicks();
-    startShooting();
+    askFourCuts();
   });
   $('#useShotBtn').addEventListener('click', enterWrite);
   $('#backToShotBtn').addEventListener('click', async () => {
@@ -804,8 +845,20 @@ async function init() {
   buildPlaces();
   // AI 빛 보정은 환경에 따라 켜진다. 외부 서비스를 쓰는 경우에는 처음 화면에 안내를 띄운다
   const ai = state.cfg.ai || {};
+  const fx = state.cfg.effects || [];
   $('#aiHint').hidden = !ai.on;
   $('#aiNotice').hidden = !ai.external;
+  if (fx.length) {
+    $('#aiNotice').textContent = '휴대폰에서 AI 효과를 누르면 그 사진이 외부 AI 서비스(OpenAI)로 전송돼요.';
+    // 받기 화면 사진 위에 '휴대폰에서 AI로 바꿔 보기' 안내를 얹는다 (만드는 건 휴대폰에서)
+    const box = $('#fxOverlay');
+    const head = document.createElement('b');
+    head.textContent = '✨ QR로 받은 뒤 휴대폰에서 AI로 바꿔 보세요';
+    const list = document.createElement('span');
+    list.textContent = fx.map((e) => e.name).join(' · ');
+    box.replaceChildren(head, list);
+    box.hidden = false;
+  }
   setMode(1);
   startSlides();
 }

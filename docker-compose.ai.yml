@@ -14,7 +14,7 @@ services:
     image: yeongsangang-ic-light
     restart: unless-stopped
     environment:
-      IC_STEPS: ${IC_STEPS:-20}
+      IC_STEPS: ${IC_STEPS:-15}
       IC_CFG: ${IC_CFG:-2.0}
     volumes:
       - ai_cache:/cache     # 모델 약 6GB. 지우면 다시 내려받는다

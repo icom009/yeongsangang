@@ -30,6 +30,11 @@ services:
       # 생성형 AI 빛 보정: auto면 로컬 IC-Light(docker-compose.ai.yml) → 외부 API 키 → 끔
       YS_AI: ${YS_AI:-auto}
       YS_AI_KEY: ${YS_AI_KEY:-}
+      # 휴대폰 'AI로 바꿔 보기' 버튼(GPT 이미지 편집, 유료). 키가 없으면 버튼이 안 보인다
+      YS_OPENAI_KEY: ${YS_OPENAI_KEY:-}
+      YS_GPT_MODEL: ${YS_GPT_MODEL:-}
+      YS_GPT_QUALITY: ${YS_GPT_QUALITY:-}
+      YS_GPT_DAILY: ${YS_GPT_DAILY:-}
       # 관리 화면(/manage) 비밀번호와 메일 재전송 설정
       YS_MANAGE_KEY: ${YS_MANAGE_KEY:-}
       YS_SMTP_HOST: ${YS_SMTP_HOST:-}

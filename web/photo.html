@@ -31,16 +31,19 @@
     .photo-page .actions { display: grid; gap: 10px; }
     .photo-page .actions .btn { width: 100%; text-decoration: none; }
     .photo-page .tip { margin: 0; color: var(--text-dim); font-size: .9rem; text-align: center; }
-    .photo-page .ver { display: flex; gap: 8px; margin-bottom: 12px; }
+    .photo-page .ver { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .photo-page .ver-label { width: 100%; margin: 4px 0 -2px; color: var(--text-faint); font-size: .8rem; }
     .photo-page .ver button {
-      flex: 1; padding: 10px 8px; border-radius: 999px; cursor: pointer;
+      padding: 9px 14px; border-radius: 999px; cursor: pointer;
       border: 1px solid rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .06);
-      color: var(--text-dim); font: inherit; font-size: .92rem; font-weight: 600;
+      color: var(--text-dim); font: inherit; font-size: .9rem; font-weight: 600;
     }
     .photo-page .ver button[aria-pressed="true"] {
       background: var(--sail-hi); border-color: transparent; color: #11242a;
     }
-    .photo-page .ver .tag { font-size: .72rem; opacity: .85; margin-left: 4px; }
+    .photo-page .ver button.fx-idle::before { content: '✨ '; }
+    .photo-page .ver button.fx-pending { opacity: .7; cursor: progress; }
+    .photo-page .ver button:disabled { opacity: .45; cursor: default; }
     .photo-page .ai-note { margin: 10px 0 0; color: var(--text-dim); font-size: .85rem; text-align: center; }
     .photo-page .missing { padding: 40px 0; }
     .photo-page .missing p { color: var(--text-dim); }
@@ -55,10 +58,7 @@
   </header>
 
   <div id="ready" hidden>
-    <div class="ver" id="ver" hidden role="group" aria-label="사진 고르기">
-      <button type="button" data-ver="base" aria-pressed="true">기본</button>
-      <button type="button" data-ver="ai" aria-pressed="false">AI 빛 보정<span class="tag">NEW</span></button>
-    </div>
+    <div class="ver" id="ver" hidden role="group" aria-label="사진 고르기"></div>
     <img class="shot" id="shot" alt="포토부스에서 찍은 사진">
     <p class="ai-note" id="aiNote" hidden></p>
     <div class="actions" style="margin-top:18px">
@@ -79,17 +79,27 @@
     document.getElementById('missing').hidden = false;
     document.getElementById('title').textContent = '사진이 없어요';
   } else {
-    const shot = document.getElementById('shot');
-    const note = document.getElementById('aiNote');
-    const tip = document.getElementById('tip');
+    const $ = (s) => document.querySelector(s);
+    const shot = $('#shot');
+    const note = $('#aiNote');
+    const tip = $('#tip');
     const amb = document.querySelector('#ambient img');
-    // base: 부스에서 고른 사진, ai: 뒤에서 만들어진 AI 빛 보정 버전
-    const urls = { base: { final: `/media/${sid}/final.jpg`, photo: `/media/${sid}/shot.jpg` } };
+    // base: 부스에서 고른 사진, light: AI 빛 보정, 그 밖: 휴대폰에서 누른 AI 효과
+    const versions = { base: { final: `/media/${sid}/final.jpg`, photo: `/media/${sid}/shot.jpg` } };
+    const fxState = {};   // 효과 id -> idle | pending | failed | limit
+    let catalog = [];
     let cur = 'base';
-    const files = {};   // 공유 시트로 바로 저장할 수 있게 미리 받아 둔다
+    let lightPending = false;
+    let wanted = null;    // 방금 누른 효과. 다 만들어지면 바로 보여 준다
+    const files = {};     // 공유 시트로 바로 저장할 수 있게 미리 받아 둔다
 
-    document.getElementById('ready').hidden = false;
+    $('#ready').hidden = false;
     amb.onload = () => amb.classList.add('on');
+
+    const NOTES = {
+      light: 'AI가 그곳의 빛에 맞춰 다시 비춘 사진이에요. 얼굴은 그대로예요.',
+      fx: 'AI가 새로 그린 사진이라 얼굴이 조금 달라질 수 있어요. 기본 사진도 그대로 있어요.',
+    };
 
     const canShareFiles = (f) => {
       try { return !!navigator.canShare && navigator.canShare({ files: [f] }); } catch { return false; }
@@ -126,46 +136,114 @@
     }
 
     function setVersion(v) {
-      if (!urls[v]) return;
+      if (!versions[v]) return;
       cur = v;
-      const u = urls[v];
+      const u = versions[v];
       shot.src = u.final;
       amb.src = u.final;             // 내 사진의 빛이 화면 전체에 번지게
-      note.hidden = v !== 'ai';
-      document.querySelectorAll('#ver button').forEach((b) => {
-        b.setAttribute('aria-pressed', String(b.dataset.ver === v));
-      });
+      note.textContent = v === 'base' ? '' : (v === 'light' ? NOTES.light : NOTES.fx);
+      note.hidden = v === 'base';
+      renderChips();
       prefetch(u.final, 'yeongsangang.jpg');
     }
 
-    document.getElementById('saveBtn').addEventListener('click', () => save(urls[cur].final, 'yeongsangang_frame.jpg'));
-    document.getElementById('saveShotBtn').addEventListener('click', () => save(urls[cur].photo, 'yeongsangang_photo.jpg'));
-    document.querySelectorAll('#ver button').forEach((b) => {
-      b.addEventListener('click', () => setVersion(b.dataset.ver));
-    });
+    // 사진 고르기 단추: 기본 · 빛 보정(준비되면) · AI 효과(누르면 그때 만든다)
+    function renderChips() {
+      const row = $('#ver');
+      row.innerHTML = '';
+      const add = (id, label, state) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.ver = id;
+        b.setAttribute('aria-pressed', String(cur === id));
+        b.className = state === 'ready' ? '' : `fx-${state}`;
+        b.textContent = state === 'pending' ? `${label} 만드는 중…`
+          : state === 'failed' ? `${label} 다시`
+            : state === 'limit' ? `${label} (오늘 마감)` : label;
+        b.disabled = state === 'pending' || state === 'limit';
+        b.addEventListener('click', () => (state === 'ready' ? setVersion(id) : makeEffect(id)));
+        row.appendChild(b);
+      };
+      add('base', '기본', 'ready');
+      if (versions.light) add('light', '빛 보정', 'ready');
+      if (catalog.length) {
+        const lab = document.createElement('p');
+        lab.className = 'ver-label';
+        lab.textContent = 'AI로 바꿔 보기 (누르면 만들어요)';
+        row.appendChild(lab);
+        catalog.forEach((e) => add(e.id, e.name, versions[e.id] ? 'ready' : (fxState[e.id] || 'idle')));
+      }
+      row.hidden = row.querySelectorAll('button').length <= 1;
+    }
+
+    let agreed = false;
+    async function makeEffect(id) {
+      // 사진이 바깥으로 나가는 순간이므로 처음 한 번은 꼭 묻는다
+      if (!agreed && !confirm('AI 효과를 만들려면 이 사진이 외부 AI 서비스(OpenAI)로 전송돼요. 계속할까요?')) return;
+      agreed = true;
+      wanted = id;
+      fxState[id] = 'pending';
+      renderChips();
+      note.textContent = 'AI가 그리고 있어요. 20초쯤 걸려요. 화면을 닫지 말고 기다려 주세요.';
+      note.hidden = false;
+      try {
+        const res = await (await fetch(`/p/${sid}/fx/${id}`, { method: 'POST' })).json();
+        apply({ effects: { [id]: res } });
+      } catch {
+        fxState[id] = 'failed';
+        renderChips();
+      }
+      poll();
+    }
+
+    function apply(res) {
+      if (res.state === 'ready' && !versions.light) {
+        versions.light = { final: res.final || res.photo, photo: res.photo };
+      }
+      lightPending = res.state === 'pending';
+      if (res.catalog) catalog = res.catalog;
+      Object.entries(res.effects || {}).forEach(([id, st]) => {
+        if (st.state === 'ready') {
+          versions[id] = { final: st.final, photo: st.photo };
+          delete fxState[id];
+        } else {
+          fxState[id] = st.state === 'pending' ? 'pending' : st.state === 'limit' ? 'limit' : 'failed';
+        }
+      });
+      if (wanted && versions[wanted]) {
+        const id = wanted;
+        wanted = null;
+        setVersion(id);
+        return;
+      }
+      renderChips();
+    }
+
+    // 만드는 중인 것이 있는 동안만 물어본다
+    let polling = false;
+    let tries = 0;
+    async function poll() {
+      if (polling) return;
+      polling = true;
+      tries = 0;
+      while (tries++ < 80) {
+        let res;
+        try {
+          res = await (await fetch(`/p/${sid}/ai`, { cache: 'no-store' })).json();
+        } catch { await new Promise((r) => setTimeout(r, 5000)); continue; }
+        apply(res);
+        const busy = lightPending || Object.values(fxState).includes('pending');
+        if (!busy) break;
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+      polling = false;
+    }
+
+    $('#saveBtn').addEventListener('click', () => save(versions[cur].final, 'yeongsangang_frame.jpg'));
+    $('#saveShotBtn').addEventListener('click', () => save(versions[cur].photo, 'yeongsangang_photo.jpg'));
     if (!navigator.canShare) tip.textContent = '저장이 안 되면 사진을 길게 눌러 ‘사진 앱에 저장’을 고르세요.';
     setVersion('base');
-
-    // AI 빛 보정 버전은 부스에서 사진을 받은 뒤에도 뒤에서 만들어진다. 준비되면 고르기 단추가 생긴다
-    let tries = 0;
-    async function pollAi() {
-      if (tries++ > 40) return;                       // 2분쯤 기다리고 그만둔다
-      let res;
-      try {
-        res = await (await fetch(`/p/${sid}/ai`, { cache: 'no-store' })).json();
-      } catch { return setTimeout(pollAi, 5000); }
-      if (res.state === 'pending') {
-        note.textContent = 'AI 빛 보정 버전을 만들고 있어요. 잠시만요…';
-        note.hidden = false;
-        return setTimeout(pollAi, 3000);
-      }
-      if (res.state !== 'ready') return;              // off·failed면 조용히 둔다
-      urls.ai = { final: res.final || res.photo, photo: res.photo };
-      note.textContent = 'AI가 그곳의 빛에 맞춰 다시 비춘 사진이에요. 얼굴은 그대로예요.';
-      note.hidden = cur !== 'ai';
-      document.getElementById('ver').hidden = false;
-    }
-    pollAi();
+    poll();
   }
 </script>
 </body>
