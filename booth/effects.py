@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from . import config, frame, records, storage
+from . import compose, config, frame, records, storage
 
 _lock = threading.Lock()
 _jobs = {}            # (sid, 효과 id) -> 'pending' | 'failed' | 'limit'
@@ -76,7 +76,7 @@ def _today():
         _day.update(date=today, count=0, cost=0.0)
 
 
-def _save():
+def _save_usage():
     try:
         _USAGE.write_text(json.dumps({'date': str(_day['date']), 'count': _day['count'],
                                       'cost': round(_day['cost'], 4)}), encoding='utf-8')
@@ -91,7 +91,7 @@ def _spend(n):
         if _day['count'] + n > config.GPT_DAILY:
             return False
         _day['count'] += n
-        _save()
+        _save_usage()
         return True
 
 
@@ -156,10 +156,11 @@ async def _make(sid, fx, rec, sources):
     t0 = time.time()
 
     async def one(path, bg_id):
-        look = config.BG_BY_ID.get(bg_id, {}).get('look', {})
-        prompt = effect['prompt'].format(act=look.get('act') or 'enjoying the scenery together')
         async with _sem:
-            return await asyncio.to_thread(_edit, path, prompt)
+            img = await asyncio.to_thread(_edit, path, effect['prompt'])
+        if effect.get('keep_background') and bg_id in config.BG_BY_ID:
+            img = await asyncio.to_thread(_keep_background, img, bg_id)
+        return img
 
     try:
         imgs = await asyncio.gather(*[one(p, b) for p, b in zip(sources, bgs)])
@@ -180,6 +181,22 @@ def _save(sid, fx, imgs, message):
     else:
         frame.save_grid(imgs, storage.path(sid, f'fx_{fx}'))
         frame.render(imgs, message, storage.path(sid, f'fxf_{fx}'))
+
+
+def _keep_background(img, bg_id):
+    """GPT가 새로 그린 사진에서 사람만 오려 원래 배경 위에 다시 얹는다.
+    말로 '배경은 그대로'라고 해도 GPT는 꽃밭을 데크로 바꾸는 식으로 배경을 조금씩 다시 그린다.
+    이렇게 하면 배경은 원본과 똑같고, 사람의 포즈·빛만 GPT가 정한 대로 남는다."""
+    W, H = config.SHOT_W, config.SHOT_H
+    photo = cv2.cvtColor(np.array(img.convert('RGB')), cv2.COLOR_RGB2BGR)
+    a = compose.matte(photo)
+    if float((a > 0.5).mean()) < 0.01:  # 사람을 못 찾으면 GPT 결과를 그대로 쓴다
+        return img
+    bg = compose.cover(compose.read_image(config.BG_DIR / f'bg_{bg_id}.png'), W, H).astype(np.float32) / 255
+    F = compose.estimate_foreground(photo.astype(np.float32) / 255, a)
+    F = compose.light_wrap(F, a, bg)
+    out = compose._finish(F, a, bg, compose.foreground_mask(bg_id, W, H))
+    return Image.fromarray(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
 
 
 def _multipart(fields, files):
@@ -225,7 +242,7 @@ def _edit(path, prompt):
     with _lock:
         _today()
         _day['cost'] += cost
-        _save()
+        _save_usage()
     print(f'[효과] 토큰 입력 {u.get("input_tokens")} · 출력 {u.get("output_tokens")} → ${cost:.4f}', flush=True)
     data = base64.b64decode(res['data'][0]['b64_json'])
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
