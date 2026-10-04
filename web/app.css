@@ -186,7 +186,11 @@ img { display: block; max-width: 100%; }
   position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
   padding: 8px 18px; border-radius: 999px; background: var(--shade); backdrop-filter: blur(6px);
   border: 1px solid var(--glass-line); color: var(--text); font-weight: 700; font-size: 1.05rem; z-index: 5;
+  max-width: calc(100% - 32px); text-align: center;
 }
+/* 다음 컷을 기다릴 때: 눈에 띄게 살짝 숨 쉬듯 */
+.cut-badge.waiting { background: rgba(243, 179, 61, .92); color: var(--on-sail); border-color: transparent; animation: badge-pulse 1.6s ease-in-out infinite; }
+@keyframes badge-pulse { 0%, 100% { transform: translateX(-50%) scale(1); } 50% { transform: translateX(-50%) scale(1.04); } }
 .deck-pick {
   position: absolute; top: 14px; right: 14px; min-width: 34px; height: 34px; z-index: 4;
   display: none; place-items: center; border-radius: 999px;

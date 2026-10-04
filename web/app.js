@@ -5,7 +5,6 @@ const $ = (s) => document.querySelector(s);
 const IDLE_MS = 120_000;      // 아무 조작이 없으면 처음 화면으로
 const TAKE_IDLE_SEC = 90;     // 받기 화면에서 처음으로 돌아가기까지
 const QR_DELAY_MS = 500;      // 완성 사진이 뜬 뒤 QR이 따라 올라오는 짧은 틈
-const CUT_GAP_SEC = 3;        // 네 컷은 3초마다 한 장씩 쉬지 않고 찍는다
 
 // 휴대폰에서 난 오류를 서버 로그로 보낸다 (현장에서 원인 확인용)
 function report(kind, msg) {
@@ -29,6 +28,7 @@ const state = {
   picks: [],          // 4컷에서 고른 장소 네 곳
   cuts: [],           // 찍은 사진들 {id, shot, plain, person}
   cutIndex: 0,        // 지금 몇 번째 컷인지
+  jobs: [],           // 네 컷: 찍자마자 서버로 보낸 합성 작업들 (한 장씩 찍는 동안 뒤에서 돈다)
 };
 
 let live = null;
@@ -235,6 +235,7 @@ function goHome() {
   state.busy = false;
   state.cuts = [];
   state.cutIndex = 0;
+  state.jobs = [];
   setMode(1);
   $('#msgInput').value = '';
   show('intro');
@@ -419,10 +420,14 @@ function enterStudio() {
   resetIdle();
 }
 
-function showCutBadge() {
+function showCutBadge(waiting = false) {
   const el = $('#cutBadge');
   el.hidden = state.mode !== 4;
-  if (state.mode === 4) el.textContent = `${state.cutIndex + 1} / 4번째 사진`;
+  if (state.mode !== 4) return;
+  el.textContent = waiting
+    ? `${state.cutIndex + 1} / 4번째 · 포즈를 바꾸고 준비되면 찍기를 눌러 주세요`
+    : `${state.cutIndex + 1} / 4번째 사진`;
+  el.classList.toggle('waiting', waiting);
 }
 
 function setReview(on) {
@@ -497,6 +502,8 @@ function preloadPicks() {
   });
 }
 
+// 한 컷이면 찍고 바로 합성, 네 컷이면 한 장 찍을 때마다 '찍기'를 다시 눌러야 다음으로 넘어간다
+// (자동으로 넘어가면 포즈 잡을 틈이 없다는 현장 의견). 합성은 찍자마자 뒤에서 돌려 마지막에 덜 기다린다
 async function shoot() {
   if (state.busy) return;
   state.busy = true;
@@ -505,33 +512,39 @@ async function shoot() {
   $('.studio').classList.add('locked');
 
   const four = state.mode === 4;
-  const jobs = [];
-  for (let i = 0; i < (four ? 4 : 1); i++) {
-    if (four) {
-      state.cutIndex = i;
-      showCutBadge();
-      if (i > 0) await selectBg(state.picks[i], true);
-    }
-    await countdown(i === 0 ? state.timer : CUT_GAP_SEC);
-    let blob;
-    try {
-      blob = await live.capture();
-    } catch (e) {
-      report('capture', e?.message || e);
-      toast('사진을 찍지 못했어요. 다시 찍어 주세요.');
-      return finishShoot(false);
-    }
-    snapEffect();
-    // 합성은 뒤에서 돌리고 바로 다음 컷으로 넘어간다 (기다리지 않는다)
-    jobs.push(sendShot(blob, four ? state.picks[i] : state.bg));
+  if (!four || state.cutIndex === 0) state.jobs = [];
+  if (four) showCutBadge();
+  await countdown(state.timer);
+  let blob;
+  try {
+    blob = await live.capture();
+  } catch (e) {
+    report('capture', e?.message || e);
+    toast('사진을 찍지 못했어요. 다시 찍어 주세요.');
+    return finishShoot(false);
+  }
+  snapEffect();
+  state.jobs.push(sendShot(blob, four ? state.picks[state.cutIndex] : state.bg));
+
+  if (four && state.jobs.length < 4) {
+    // 다음 장소로 바꾸고, 포즈를 잡은 방문객이 다시 '찍기'를 누를 때까지 기다린다
+    state.cutIndex = state.jobs.length;
+    state.busy = false;
+    await selectBg(state.picks[state.cutIndex]);
+    showCutBadge(true);
+    $('#shutterBtn').disabled = false;
+    $('.studio').classList.remove('locked');
+    resetIdle();
+    return;
   }
   live.freeze();
 
+  const jobs = state.jobs;
   $('#busy').hidden = false;
   $('#busyText').textContent = four
     ? '네 컷을 풍경 속에 담는 중이에요. 잠시만 기다려 주세요'
     : '풍경 속에 자연스럽게 담는 중이에요';
-  if (four) {  // 몇 장까지 됐는지 보여 준다
+  if (four) {  // 몇 장까지 됐는지 보여 준다 (먼저 찍은 컷은 이미 끝나 있다)
     let done = 0;
     jobs.forEach((j) => j.then(() => {
       done += 1;
@@ -553,6 +566,12 @@ async function shoot() {
   } catch (e) {
     report('compose', e?.message || e);
     toast(e.message || '합성하지 못했어요. 다시 찍어 주세요.');
+    if (four) {  // 네 컷 중 하나라도 못 만들면 첫 컷부터 다시
+      state.cutIndex = 0;
+      state.jobs = [];
+      await selectBg(state.picks[0], true);
+      showCutBadge();
+    }
     finishShoot(false);
   } finally {
     clearTimeout(slow);
@@ -645,6 +664,7 @@ function retake() {
   state.shotId = null;
   state.cuts = [];
   state.cutIndex = 0;
+  state.jobs = [];
   setReview(false);
   showCutBadge();
   if (state.mode === 4) selectBg(state.picks[0], true);
