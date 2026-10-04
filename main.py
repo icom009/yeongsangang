@@ -425,12 +425,24 @@ async def photo_effect(sid: str, fx: str):  # async: 뒤에서 돌 작업을 이
     return JSONResponse(effects.request(sid, fx), headers=NO_STORE)
 
 
+@app.post('/p/log')
+async def phone_log(request: Request):
+    """휴대폰 받기 화면의 스크립트 오류 (어떤 브라우저에서 멈췄는지 보려고). 공개 주소라 짧게만 남긴다."""
+    body = (await request.body())[:1200].decode('utf-8', 'replace')
+    print(f'[휴대폰] {body}', flush=True)
+    return {'ok': True}
+
+
 @app.get('/p/{sid}', response_class=HTMLResponse)
 def photo_page(sid: str):
     page = (config.WEB_DIR / 'photo.html').read_text(encoding='utf-8')
     ok = storage.valid_id(sid) and storage.path(sid, 'final').exists()
     page = page.replace('{{SID}}', html.escape(sid if ok else ''))
     page = page.replace('{{STATE}}', 'ready' if ok else 'missing')
+    # 스크립트가 안 도는 브라우저(일부 QR 앱·메신저 안 브라우저)에서도 사진은 보이도록 서버가 넣는다
+    page = page.replace('{{HIDE_READY}}', '' if ok else 'hidden')
+    page = page.replace('{{HIDE_MISSING}}', 'hidden' if ok else '')
+    page = page.replace('{{FINAL}}', f'/media/{sid}/final.jpg' if ok else '')
     return HTMLResponse(page, status_code=200 if ok else 404, headers=NO_STORE)
 
 

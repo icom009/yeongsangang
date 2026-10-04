@@ -207,6 +207,9 @@ def _mark(sid, state):
 
 def status(sid):
     """휴대폰 받기 화면이 물어보는 상태. off면 화면에 아무것도 띄우지 않는다."""
+    # 다 만든 빛 보정은 파일로 남는다. 서버를 다시 켜 메모리가 비어도(배포할 때마다) 그대로 보여 준다
+    if storage.path(sid, 'aifinal').exists():
+        return {'state': 'ready', 'photo': f'/media/{sid}/ai.jpg', 'final': f'/media/{sid}/aifinal.jpg'}
     if _engine is None:
         return {'state': 'off'}
     with _lock:

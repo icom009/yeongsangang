@@ -44,6 +44,12 @@
     .photo-page .ver button.fx-idle::before { content: '✨ '; }
     .photo-page .ver button.fx-pending { opacity: .7; cursor: progress; }
     .photo-page .ver button:disabled { opacity: .45; cursor: default; }
+    .photo-page .consent {
+      margin: 0 0 12px; padding: 14px; border-radius: 14px;
+      background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .2);
+    }
+    .photo-page .consent p { margin: 0 0 10px; font-size: .9rem; color: var(--text-dim); }
+    .photo-page .consent-actions { display: flex; gap: 8px; justify-content: flex-end; }
     .photo-page .ai-note { margin: 10px 0 0; color: var(--text-dim); font-size: .85rem; text-align: center; }
     .photo-page .missing { padding: 40px 0; }
     .photo-page .missing p { color: var(--text-dim); }
@@ -57,9 +63,16 @@
     <h1 id="title">오늘의 영산강 사진</h1>
   </header>
 
-  <div id="ready" hidden>
+  <div id="ready" {{HIDE_READY}}>
     <div class="ver" id="ver" hidden role="group" aria-label="사진 고르기"></div>
-    <img class="shot" id="shot" alt="포토부스에서 찍은 사진">
+    <div class="consent" id="consent" hidden>
+      <p>AI 효과를 만들려면 이 사진이 외부 AI 서비스(OpenAI)로 전송돼요.</p>
+      <div class="consent-actions">
+        <button class="btn btn-glass btn-sm" id="consentNo" type="button">취소</button>
+        <button class="btn btn-sail btn-sm" id="consentYes" type="button">동의하고 만들기</button>
+      </div>
+    </div>
+    <img class="shot" id="shot" src="{{FINAL}}" alt="포토부스에서 찍은 사진">
     <p class="ai-note" id="aiNote" hidden></p>
     <div class="actions" style="margin-top:18px">
       <button class="btn btn-sail btn-lg" id="saveBtn" type="button">사진 저장하기</button>
@@ -68,10 +81,23 @@
     <p class="tip" id="tip" style="margin-top:14px">저장을 누르면 사진 앱에 바로 담을 수 있어요.</p>
   </div>
 
-  <div class="missing" id="missing" hidden>
+  <div class="missing" id="missing" {{HIDE_MISSING}}>
     <p>사진을 찾을 수 없어요. 보관 기간이 지나 삭제됐거나 주소가 잘못됐어요. 부스에서 QR코드를 다시 찍어 주세요.</p>
   </div>
 </main>
+<script>
+  // 휴대폰에서 스크립트 오류가 나면 서버 로그에 남긴다 (QR 앱·메신저 안 브라우저 문제를 찾으려고)
+  (function () {
+    function send(msg) {
+      try {
+        var body = JSON.stringify({ msg: String(msg).slice(0, 500), ua: navigator.userAgent, url: location.pathname });
+        if (navigator.sendBeacon) navigator.sendBeacon('/p/log', body);
+      } catch (e) { /* 무시 */ }
+    }
+    window.addEventListener('error', function (e) { send((e.message || 'error') + ' @' + e.lineno + ':' + e.colno); });
+    window.addEventListener('unhandledrejection', function (e) { send('rejection ' + (e.reason && e.reason.message || e.reason)); });
+  })();
+</script>
 <script>
   const page = document.querySelector('.photo-page');
   const sid = page.dataset.sid;
@@ -176,11 +202,26 @@
       row.hidden = row.querySelectorAll('button').length <= 1;
     }
 
+    // 사진이 바깥으로 나가는 순간이므로 처음 한 번은 꼭 묻는다.
+    // confirm() 창은 메신저·QR 앱 안 브라우저에서 막히기도 해서 화면 안 버튼으로 묻는다
     let agreed = false;
-    async function makeEffect(id) {
-      // 사진이 바깥으로 나가는 순간이므로 처음 한 번은 꼭 묻는다
-      if (!agreed && !confirm('AI 효과를 만들려면 이 사진이 외부 AI 서비스(OpenAI)로 전송돼요. 계속할까요?')) return;
+    let asking = null;
+    $('#consentYes').addEventListener('click', () => {
       agreed = true;
+      $('#consent').hidden = true;
+      if (asking) makeEffect(asking);
+    });
+    $('#consentNo').addEventListener('click', () => {
+      asking = null;
+      $('#consent').hidden = true;
+    });
+    async function makeEffect(id) {
+      if (!agreed) {
+        asking = id;
+        $('#consent').hidden = false;
+        return;
+      }
+      asking = null;
       wanted = id;
       fxState[id] = 'pending';
       renderChips();
