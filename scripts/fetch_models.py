@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from booth import config  # noqa: E402
-from booth.compose import ensure_model  # noqa: E402
+from booth.compose import _download, ensure_model  # noqa: E402
 
 MP_VERSION = '1.0.1'  # web/live.js의 MP_VERSION과 같게
 MP_CDN = f'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@{MP_VERSION}/'
@@ -40,4 +40,5 @@ def fetch_mediapipe():
 
 
 print(ensure_model())
+print(_download(config.FACE_MODEL, config.FACE_URL))  # AI 효과에서 얼굴 수 세기
 print(fetch_mediapipe())

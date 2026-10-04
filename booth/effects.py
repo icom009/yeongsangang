@@ -156,11 +156,23 @@ async def _make(sid, fx, rec, sources):
     t0 = time.time()
 
     async def one(path, bg_id):
-        async with _sem:
-            img = await asyncio.to_thread(_edit, path, effect['prompt'])
-        if effect.get('keep_background') and bg_id in config.BG_BY_ID:
-            img = await asyncio.to_thread(_keep_background, img, bg_id)
-        return img
+        keep = effect.get('keep_background') and bg_id in config.BG_BY_ID
+        base = await asyncio.to_thread(count_faces, cv2.imread(str(path)))
+        for attempt in range(2):
+            if attempt and not _spend(1):  # 다시 그리는 것도 하루 상한 안에서만
+                break
+            async with _sem:
+                img = await asyncio.to_thread(_edit, path, effect['prompt'])
+            found = await asyncio.to_thread(count_faces, _bgr(img))
+            if base and found > base:
+                # '가족사진'이라고 했더니 혼자 찍은 아이 옆에 어른 둘을 지어내 넣은 일이 있었다
+                print(f'[효과] 얼굴이 {base}명에서 {found}명으로 늘어 버림 ({sid} {fx}, {attempt + 1}번째)',
+                      flush=True)
+                continue
+            if keep:
+                img = await asyncio.to_thread(_keep_background, img, bg_id)
+            return img
+        raise RuntimeError('GPT가 없던 사람을 그려 넣었다')
 
     try:
         imgs = await asyncio.gather(*[one(p, b) for p, b in zip(sources, bgs)])
@@ -183,12 +195,50 @@ def _save(sid, fx, imgs, message):
         frame.render(imgs, message, storage.path(sid, f'fxf_{fx}'))
 
 
+_faces = None
+
+
+def _face_session():
+    global _faces
+    if _faces is None:
+        import onnxruntime as ort
+        compose._download(config.FACE_MODEL, config.FACE_URL)
+        o = ort.SessionOptions()
+        o.log_severity_level = 3
+        _faces = ort.InferenceSession(str(config.FACE_MODEL), o, providers=['CPUExecutionProvider'])
+    return _faces
+
+
+def _bgr(img):
+    return cv2.cvtColor(np.array(img.convert('RGB')), cv2.COLOR_RGB2BGR)
+
+
+def count_faces(bgr, threshold=0.7):
+    """사진 속 얼굴 수. GPT 결과가 원본보다 많으면 없던 사람을 그려 넣은 것이다."""
+    sess = _face_session()
+    x = cv2.resize(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), (640, 480)).astype(np.float32)
+    x = ((x - 127) / 128).transpose(2, 0, 1)[None]
+    scores, boxes = sess.run(None, {sess.get_inputs()[0].name: x})
+    keep = scores[0, :, 1] > threshold
+    sc, bx = scores[0, keep, 1], boxes[0, keep]
+    area = (bx[:, 2] - bx[:, 0]) * (bx[:, 3] - bx[:, 1])
+    order, n = sc.argsort()[::-1], 0
+    while order.size:  # 겹치는 상자는 하나로 (NMS)
+        i, rest = order[0], order[1:]
+        n += 1
+        w = np.clip(np.minimum(bx[i, 2], bx[rest, 2]) - np.maximum(bx[i, 0], bx[rest, 0]), 0, None)
+        h = np.clip(np.minimum(bx[i, 3], bx[rest, 3]) - np.maximum(bx[i, 1], bx[rest, 1]), 0, None)
+        iou = w * h / (area[i] + area[rest] - w * h + 1e-9)
+        order = rest[iou < 0.3]
+    return n
+
+
 def _keep_background(img, bg_id):
     """GPT가 새로 그린 사진에서 사람만 오려 원래 배경 위에 다시 얹는다.
     말로 '배경은 그대로'라고 해도 GPT는 꽃밭을 데크로 바꾸는 식으로 배경을 조금씩 다시 그린다.
     이렇게 하면 배경은 원본과 똑같고, 사람의 포즈·빛만 GPT가 정한 대로 남는다."""
     W, H = config.SHOT_W, config.SHOT_H
-    photo = cv2.cvtColor(np.array(img.convert('RGB')), cv2.COLOR_RGB2BGR)
+    photo = _bgr(img)
     a = compose.matte(photo)
     if float((a > 0.5).mean()) < 0.01:  # 사람을 못 찾으면 GPT 결과를 그대로 쓴다
         return img

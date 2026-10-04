@@ -89,11 +89,16 @@ EFFECTS = [
     {'id': 'scene', 'name': 'AI 장면 연출', 'desc': '표정은 그대로, 이곳에 어울리는 기념사진으로',
      # 포즈는 정해 주지 않고 GPT에게 맡긴다. 배경은 effects.py가 원본으로 다시 덮어 그대로 둔다
      'keep_background': True,
-     'prompt': 'Turn this into a natural, heartwarming commemorative photo of these people at this place, '
-               'like a family photo taken on the spot by a professional photographer. Freely choose natural, '
-               'relaxed poses and positions for the people that suit the scene and each other. '
-               + _KEEP + 'Do not change the background at all: keep the scenery, sky, water, boats, buildings '
-               'and colors exactly as they are. Photorealistic, lit by the same light as the scene.'},
+     # '가족사진'이라고 하면 GPT가 없던 가족을 지어내 넣었다(혼자 찍은 아이 옆에 어른 둘). 그 말은 쓰지 않고,
+     # 사진 속 사람만 쓰라고 못 박는다
+     'prompt': 'Turn this into a natural, heartwarming commemorative photo of the people in this picture at '
+               'this place, as if a professional photographer took it on the spot. Use only the people who are '
+               'already in the photo: do not add, remove, duplicate or replace anyone. If there is only one '
+               'person, keep it a photo of that one person. Freely choose natural, relaxed poses and positions '
+               'for them that suit the scene. Keep each person\'s face, identity, facial expression, hairstyle, '
+               'skin tone and clothing exactly as they are. Do not change the background at all: keep the '
+               'scenery, sky, water, boats, buildings and colors exactly as they are. Photorealistic, lit by '
+               'the same light as the scene.'},
     {'id': 'watercolor', 'name': '수채화 동화', 'desc': '부드러운 수채화 그림책처럼',
      'prompt': 'Turn this photo into a soft, hand-painted watercolor storybook illustration with gentle washes '
                'and paper texture. Keep the same composition and scenery, and keep the same people with '
@@ -109,6 +114,12 @@ EFFECTS = [
 ]
 EFFECT_IDS = [e['id'] for e in EFFECTS]
 EFFECT_BY_ID = {e['id']: e for e in EFFECTS}
+
+
+# 얼굴 세기(UltraFace RFB-640, MIT, 1.5MB). GPT가 없던 사람을 그려 넣었는지 확인한다 (CPU로 돈다)
+FACE_MODEL = MODEL_DIR / 'ultraface_rfb640.onnx'
+FACE_URL = ('https://github.com/onnx/models/raw/main/validated/vision/body_analysis/'
+            'ultraface/models/version-RFB-640.onnx')
 
 
 def gpt_ready():
