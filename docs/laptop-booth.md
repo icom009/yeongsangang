@@ -54,11 +54,15 @@
    - `scripts\laptop\start-fallback.bat`을 한 번 실행해 **서버 이미지를 만들어 둡니다**. 처음엔 몇 분 걸리고 인터넷이 필요합니다. 확인했으면 `stop-fallback.bat`으로 끕니다.
    - 노트북에서 빌드하기 어렵다면 집 PC에서 만든 이미지를 옮깁니다:
      집 PC에서 `docker save yeongsangang-booth:cpu -o booth-cpu.tar` → 노트북에서 `docker load -i booth-cpu.tar`
+   - **코드가 바뀌면 이미지도 새로 만들어야 합니다.** `start-fallback.bat`은 이미 만든 이미지를 그대로 쓰므로,
+     `git pull` 뒤 `docker compose -f docker-compose.laptop.yml --env-file .env.laptop build`를 한 번 실행합니다.
 
 ## 평소 모드
 
 1. `scripts\laptop\open-booth.bat`을 더블클릭합니다. 크롬이 전체 화면으로 `https://ysg26.cloud`를 엽니다.
 2. 끝낼 때는 **Alt+F4**.
+
+서버를 고쳐 배포하면 다음에 화면을 열 때 새 코드가 들어옵니다. 하루 종일 켜 둔 화면에 바로 반영하려면 **Ctrl+Shift+R** 한 번.
 
 합성·AI 빛 보정·GPT 효과는 모두 집 GPU 서버가 합니다. 노트북에는 아무것도 설치할 필요가 없습니다.
 
