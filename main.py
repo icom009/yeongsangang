@@ -118,7 +118,20 @@ async def guard_public(request: Request, call_next):
     return Response(status_code=404)
 
 
-app.mount('/static', StaticFiles(directory=config.WEB_DIR), name='static')
+class FreshStatic(StaticFiles):
+    """부스 화면 코드(js·css·html)는 열 때마다 바뀌었는지 물어보게 한다 (그대로면 304로 가볍게 끝난다).
+    캐시 지시가 없으면 크롬이 예전 코드를 몇 시간씩 그대로 써서, 배포한 고침이 노트북 부스에 늦게 닿는다.
+    MediaPipe 사본(vendor/)은 버전이 고정이라 그대로 둔다."""
+
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        res = super().file_response(full_path, stat_result, scope, status_code)
+        name = str(full_path)
+        if name.endswith(('.js', '.css', '.html')) and '/vendor/' not in name:
+            res.headers['Cache-Control'] = 'no-cache'
+        return res
+
+
+app.mount('/static', FreshStatic(directory=config.WEB_DIR), name='static')
 app.mount('/bgm', StaticFiles(directory=config.BGM_DIR), name='bgm')
 
 
