@@ -52,6 +52,11 @@ export class LiveStage {
 
     this.model = IS_MOBILE ? MODEL_MOBILE : MODEL_DESKTOP;
     this.segEvery = IS_MOBILE ? 66 : 33; // 인물 분리 주기(ms). 휴대폰은 초당 15회
+    this.baseEvery = this.segEvery;
+    this.segCost = 0;      // 인물 분리 한 번에 걸리는 시간(ms, 이동 평균)
+    this.slowCount = 0;
+    this.lite = IS_MOBILE; // 가벼운 모델을 쓰는 중인지
+    this.swapping = false;
     this.lastSeg = 0;
     this.segFails = 0;
     this.stallSince = 0;
@@ -141,11 +146,12 @@ export class LiveStage {
   }
 
   /* ---------- 인물 분리 모델 ---------- */
-  async loadSegmenter() {
+  async loadSegmenter(kind = IS_MOBILE ? 'mobile' : 'desktop') {
     try {
       const local = await fetch(`${MP_LOCAL}/vision_bundle.mjs`, { method: 'HEAD' }).then((r) => r.ok, () => false);
       const base = local ? MP_LOCAL : MP_BASE;
-      const modelUrl = local ? LOCAL_MODEL[IS_MOBILE ? 'mobile' : 'desktop'] : this.model.url;
+      const model = kind === 'mobile' ? MODEL_MOBILE : MODEL_DESKTOP;
+      const modelUrl = local ? LOCAL_MODEL[kind] : model.url;
       const { FilesetResolver, ImageSegmenter } = await import(`${base}/vision_bundle.mjs`);
       const fileset = await FilesetResolver.forVisionTasks(`${base}/wasm`);
       const make = (delegate) => ImageSegmenter.createFromOptions(fileset, {
@@ -154,11 +160,15 @@ export class LiveStage {
         outputCategoryMask: false,
         outputConfidenceMasks: true,
       });
+      let seg;
       try {
-        this.segmenter = await make('GPU');
+        seg = await make('GPU');
       } catch {
-        this.segmenter = await make('CPU');
+        seg = await make('CPU');
       }
+      // 모델과 마스크 뜻(0번이 사람인지 배경인지)을 한꺼번에 바꾼다
+      this.model = model;
+      this.segmenter = seg;
       return true;
     } catch (e) {
       console.warn('segmenter unavailable', e);
@@ -264,6 +274,7 @@ export class LiveStage {
     if (now - this.lastSeg < this.segEvery) return;
     this.lastSeg = now;
     this.lastTime = this.video.currentTime;
+    const t0 = performance.now();
     let result;
     try {
       result = this.segmenter.segmentForVideo(this.video, now);
@@ -305,6 +316,31 @@ export class LiveStage {
       d[i * 4 + 3] = m * 255;
     }
     this.mctx.putImageData(this.maskData, 0, 0);
+    this.adapt(performance.now() - t0);
+  }
+
+  // 느린 노트북: 인물 분리가 화면 처리를 다 잡아먹으면 카운트다운·화면 전환까지 끊긴다.
+  // 걸린 시간을 재서 분리 간격을 늘리고(카메라 영상은 그대로 매끄럽고 오려 내기만 조금 늦게 따라온다),
+  // 그래도 느리면 가벼운 셀피 모델로 바꾼다
+  adapt(cost) {
+    this.segCost = this.segCost ? this.segCost * 0.85 + cost * 0.15 : cost;
+    this.segEvery = Math.min(400, Math.max(this.baseEvery, this.segCost * 2.5));
+    this.slowCount = this.segCost > 45 ? this.slowCount + 1 : 0;
+    if (!this.lite && !this.swapping && this.slowCount > 30) this.swapLite();
+  }
+
+  async swapLite() {
+    this.swapping = true;
+    this.lite = true;
+    const old = this.segmenter;
+    if (await this.loadSegmenter('mobile')) {
+      try { old?.close(); } catch { /* 무시 */ }
+      this.segCost = 0;
+      this.slowCount = 0;
+      this.prev = null;
+      console.info('미리보기: 이 컴퓨터가 느려 가벼운 인물 분리 모델로 바꿨어요');
+    }
+    this.swapping = false;
   }
 
   // 작은 마스크에 3x3 박스 블러: 캔버스 filter보다 훨씬 가볍고 모든 브라우저에서 같다

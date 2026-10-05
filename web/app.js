@@ -4,6 +4,8 @@ import { sound } from './sound.js';
 const $ = (s) => document.querySelector(s);
 const IDLE_MS = 120_000;      // 아무 조작이 없으면 처음 화면으로
 const TAKE_IDLE_SEC = 90;     // 받기 화면에서 처음으로 돌아가기까지
+// 마우스·터치패드로 쓰는 기기(노트북 부스)인지. 찍기를 누르고 뒤로 물러날 시간이 더 필요하다
+const FINE_POINTER = matchMedia('(pointer: fine)').matches;
 const QR_DELAY_MS = 500;      // 완성 사진이 뜬 뒤 QR이 따라 올라오는 짧은 틈
 
 // 휴대폰에서 난 오류를 서버 로그로 보낸다 (현장에서 원인 확인용)
@@ -18,7 +20,7 @@ addEventListener('unhandledrejection', (e) => report('rejection', e.reason?.stac
 const state = {
   cfg: null,
   bg: 1,
-  timer: 3,
+  timer: FINE_POINTER ? 5 : 3,  // 노트북은 누르고 1~1.5m 물러날 시간이 필요해서 5초
   shotId: null,
   shotUrl: null,      // 필터 적용 사진
   plainUrl: null,     // 필터 없는 사진
@@ -350,8 +352,15 @@ async function pickPlace(id) {
 }
 
 function askFourCuts() {
-  const names = state.picks.map((id, i) => `${i + 1}. ${bgInfo(id)?.place || ''}`).join('   ');
-  $('#guidePlaces').textContent = `고른 곳  ${names}`;
+  // 고른 곳을 장소마다 따로 (이름 중간에서 줄이 바뀌지 않게)
+  const box = $('#guidePlaces');
+  box.replaceChildren(...state.picks.map((id, i) => {
+    const chip = document.createElement('span');
+    const num = document.createElement('b');
+    num.textContent = String(i + 1);
+    chip.append(num, bgInfo(id)?.name || '');
+    return chip;
+  }));
   $('#cutGuide').showModal();
   resetIdle();
 }
@@ -471,11 +480,13 @@ async function countdown(sec) {
     cd.classList.remove('tick');
     void cd.offsetWidth;
     cd.classList.add('tick');
+    $('#lookUp').hidden = n > 1;  // 마지막 1초: 화면 위 카메라를 보게 (눈이 아래로 깔리지 않게)
     sound.beep(n === 1 ? 1100 : 820);
     await wait(1000);
   }
   cd.textContent = '';
   cd.classList.remove('tick');
+  $('#lookUp').hidden = true;
 }
 
 function snapEffect() {
@@ -722,6 +733,8 @@ function fitMessage() {
 function enterWrite() {
   $('#cardPhoto').src = chosenShot();
   show('write');
+  // 노트북·PC는 바로 칠 수 있게 입력칸에 커서를 둔다 (휴대폰은 자판이 갑자기 올라오지 않게 그대로)
+  if (FINE_POINTER) setTimeout(() => $('#msgInput').focus({ preventScroll: true }), 300);
   layoutCard();
   document.fonts.load("40px 'Ownglyph PDH'").finally(fitMessage);
   fitMessage();
@@ -804,7 +817,7 @@ function toggleMute() {
 
 /* ---------- 연결 ---------- */
 function bind() {
-  $('#startBtn').addEventListener('click', start);
+  $('#startBtn').addEventListener('click', () => { keepAwake(); start(); });
   $('#homeBtn').addEventListener('click', goHome);
   $('#shutterBtn').addEventListener('click', shoot);
   $('#retakeBtn').addEventListener('click', retake);
@@ -839,16 +852,6 @@ function bind() {
   $('#prevPlace').addEventListener('click', () => stepBg(-1));
   $('#nextPlace').addEventListener('click', () => stepBg(1));
   $('#morePlacesBtn').addEventListener('click', showPlaces);
-  addEventListener('keydown', (e) => {
-    if ($('[data-screen="places"]').hidden) return;
-    const prev = e.code === 'ArrowLeft' || e.code === 'ArrowUp';
-    const next = e.code === 'ArrowRight' || e.code === 'ArrowDown';
-    if (prev || next) {
-      e.preventDefault();
-      stepFocus(prev ? -1 : 1);
-      document.querySelector(`.deck-item[data-id="${focused}"]`)?.focus({ preventScroll: true });
-    }
-  });
   document.querySelectorAll('.look-toggle button').forEach((b) => b.addEventListener('click', () => {
     setFilter(b.dataset.filter === '1');
   }));
@@ -865,19 +868,75 @@ function bind() {
       x.setAttribute('aria-checked', String(x === b));
     });
   }));
-  // 스페이스/엔터로도 찍을 수 있게 (무선 리모컨·키보드 대응)
-  addEventListener('keydown', (e) => {
-    const onStudio = !$('[data-screen="studio"]').hidden;
-    if (!onStudio || e.target.closest('button, textarea')) return;
-    if ($('#shootControls').hidden || state.busy) return;
-    if (e.code === 'Space' || e.code === 'Enter') {
-      e.preventDefault();
-      shoot();
-    } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
-      e.preventDefault();
-      stepBg(e.code === 'ArrowLeft' ? -1 : 1);
+  addEventListener('keydown', onKey);
+  // 키오스크: 마우스를 3초 동안 안 움직이면 포인터를 숨긴다 (부스 화면이 깔끔하게)
+  let cursorTimer = 0;
+  addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    document.body.classList.remove('no-cursor');
+    clearTimeout(cursorTimer);
+    cursorTimer = setTimeout(() => document.body.classList.add('no-cursor'), 3000);
+  }, { passive: true });
+  // 화면이 꺼지지 않게 (노트북 절전 설정을 미처 못 바꿨을 때도)
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) keepAwake(); });
+}
+
+let wakeLock = null;
+async function keepAwake() {
+  try {
+    if (!('wakeLock' in navigator) || wakeLock) return;
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch { /* 지원하지 않거나 허용되지 않음 */ }
+}
+
+// 키보드·발표용 무선 리모컨으로 처음부터 끝까지 (노트북 부스)
+//   다음·확인: Enter, Space, PageDown   뒤로: PageUp, Backspace   장소 고르기: ← →
+function onKey(e) {
+  if (e.repeat) return;
+  const next = ['Enter', 'NumpadEnter', 'Space', 'PageDown'].includes(e.code);
+  const back = e.code === 'PageUp' || e.code === 'Backspace';
+  const left = e.code === 'ArrowLeft' || e.code === 'ArrowUp';
+  const right = e.code === 'ArrowRight' || e.code === 'ArrowDown';
+  const act = (fn) => { e.preventDefault(); fn(); };
+  if ($('#cutGuide').open) {
+    if (next && !e.target.closest('button')) act(() => $('#guideGo').click());
+    else if (back) act(() => $('#guideCancel').click());
+    return;
+  }
+  const scr = document.querySelector('[data-screen]:not([hidden])')?.dataset.screen;
+  if (e.target.closest('textarea, input')) {
+    // 한마디를 쓰는 중: Ctrl+Enter나 리모컨 PageDown이면 완성
+    if (scr === 'write' && ((e.code === 'Enter' && (e.ctrlKey || e.metaKey)) || e.code === 'PageDown')) {
+      act(() => $('#finishBtn').click());
     }
-  });
+    return;
+  }
+  // 단추나 장소 카드에 초점이 있으면 Enter·Space는 그쪽이 처리한다 (두 번 눌리지 않게)
+  if ((e.code === 'Enter' || e.code === 'Space') && e.target.closest('button, a, .deck-item')) return;
+  if (scr === 'intro') {
+    if (next) act(() => $('#startBtn').click());
+  } else if (scr === 'places') {
+    if (left || right) {
+      act(() => stepFocus(left ? -1 : 1));
+      document.querySelector(`.deck-item[data-id="${focused}"]`)?.focus({ preventScroll: true });
+    } else if (next) act(() => pickPlace(focused));
+    else if (back) act(goHome);
+  } else if (scr === 'studio') {
+    if (!$('#reviewControls').hidden) {  // 찍은 사진 확인
+      if (next) act(() => $('#useShotBtn').click());
+      else if (back) act(() => $('#retakeBtn').click());
+    } else if (!state.busy) {
+      if (next) act(shoot);
+      else if (left || right) act(() => stepBg(left ? -1 : 1));
+      else if (back) act(showPlaces);
+    }
+  } else if (scr === 'write') {
+    if (next) act(() => $('#finishBtn').click());
+    else if (back) act(() => $('#backToShotBtn').click());
+  } else if (scr === 'take') {
+    if (next) act(() => $('#doneBtn').click());
+  }
 }
 
 async function init() {
@@ -907,6 +966,9 @@ async function init() {
     box.hidden = false;
   }
   setMode(1);
+  document.querySelectorAll('.timer button').forEach((b) => {  // 기본 타이머 표시를 맞춘다
+    b.setAttribute('aria-checked', String(Number(b.dataset.sec) === state.timer));
+  });
   startSlides();
 }
 
