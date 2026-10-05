@@ -203,11 +203,20 @@ def has_foreground(bg_id):
     return (BG_DIR / f'fg_{bg_id}.png').exists()
 
 
+# 비상용 노트북 서버: Cloudflare 임시 터널(trycloudflare.com)의 주소를 터널 프로그램이 알려 주는 곳.
+# 주소는 터널을 켤 때마다 바뀌므로 서버가 뒤에서 주기적으로 물어 QR에 넣는다 (main.py의 _watch_tunnel)
+TUNNEL_METRICS = os.environ.get('YS_TUNNEL_METRICS', '').rstrip('/')
+TUNNEL_URL = None  # 마지막으로 알아낸 터널 주소 (https://xxxx.trycloudflare.com)
+
+
 def public_base_url():
-    """QR코드에 넣을 외부 접속 주소. 배포 환경 변수 → 내부 IP 순으로 찾는다."""
-    for key in ('YS_PUBLIC_URL', 'RENDER_EXTERNAL_URL'):
-        if os.environ.get(key):
-            return os.environ[key].rstrip('/')
+    """QR코드에 넣을 외부 접속 주소. 배포 환경 변수 → 임시 터널 → 내부 IP 순으로 찾는다."""
+    if os.environ.get('YS_PUBLIC_URL'):
+        return os.environ['YS_PUBLIC_URL'].rstrip('/')
+    if TUNNEL_URL:
+        return TUNNEL_URL
+    if os.environ.get('RENDER_EXTERNAL_URL'):
+        return os.environ['RENDER_EXTERNAL_URL'].rstrip('/')
     host = os.environ.get('SPACE_HOST')  # Hugging Face Spaces
     if host:
         return f'https://{host}'

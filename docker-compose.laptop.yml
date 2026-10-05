@@ -1,0 +1,56 @@
+# 비상용: 집 서버가 안 될 때 노트북(윈도우, GPU 없음)에서 부스 서버를 직접 돌린다.
+# 방문객은 Cloudflare 임시 터널(https://xxxx.trycloudflare.com) 주소로 자기 데이터를 써서 받는다.
+# 노트북에 인터넷(현장 와이파이나 휴대폰 핫스팟)이 있어야 한다. 자세한 순서는 docs/laptop-booth.md
+#
+#   copy .env.laptop.example .env.laptop          (처음 한 번)
+#   docker compose -f docker-compose.laptop.yml --env-file .env.laptop up -d
+#   부스 화면: http://localhost:8080   (scripts\laptop\start-fallback.bat 이 위를 대신한다)
+#
+# - 터널로 들어오는 인터넷 요청에는 방문객 받기 화면만 열린다. 촬영·관리 화면은 이 노트북 안에서만
+# - 임시 터널 주소는 터널을 다시 켤 때마다 바뀐다. 이미 QR로 나간 주소는 그때 끊기니 행사 중엔 끄지 말 것
+# - GPU가 없으므로 AI 빛 보정·몸통 보강은 저절로 꺼진다. 휴대폰 AI 효과(GPT)는 키가 있으면 된다
+name: yeongsangang-laptop
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  booth:
+    build: .
+    image: yeongsangang-booth:cpu
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${YS_PORT:-8080}:8080"
+    environment:
+      YS_TUNNEL_METRICS: http://tunnel:2000
+      YS_DEVICE: cpu
+      YS_COMPOSE_SLOTS: ${YS_COMPOSE_SLOTS:-2}
+      YS_KEEP_HOURS: ${YS_KEEP_HOURS:-168}
+      YS_BEAUTY: ${YS_BEAUTY:-1}
+      YS_AI: ${YS_AI:-auto}
+      YS_AI_KEY: ${YS_AI_KEY:-}
+      YS_OPENAI_KEY: ${YS_OPENAI_KEY:-}
+      OPENAI_KEY: ${OPENAI_KEY:-}
+      YS_GPT_DAILY: ${YS_GPT_DAILY:-}
+      YS_MANAGE_KEY: ${YS_MANAGE_KEY:-}
+    volumes:
+      - ./output-laptop:/app/output   # 비상 모드 사진은 집 서버 사진과 따로 둔다
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/config', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    # 계정 없이 쓰는 임시 터널. 주소는 metrics의 /quicktunnel 로 부스 서버가 알아낸다
+    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 --url http://booth:8080
+    logging: *logging
+    depends_on:
+      - booth

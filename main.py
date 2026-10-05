@@ -3,6 +3,7 @@ import contextlib
 import hashlib
 import hmac
 import html
+import json
 import logging
 import mimetypes
 import os
@@ -12,6 +13,7 @@ import shutil
 import socket
 import subprocess
 import time
+import urllib.request
 from urllib.parse import urlsplit
 
 import cv2
@@ -33,6 +35,25 @@ NO_STORE = {'Cache-Control': 'no-store'}
 LONG_CACHE = {'Cache-Control': 'public, max-age=86400'}
 
 
+def _ask_tunnel():
+    try:
+        with urllib.request.urlopen(f'{config.TUNNEL_METRICS}/quicktunnel', timeout=3) as r:
+            host = json.loads(r.read()).get('hostname')
+        return f'https://{host}' if host else None
+    except Exception:
+        return None
+
+
+async def _watch_tunnel():
+    """비상용 노트북 서버: 임시 터널 주소를 15초마다 확인해 QR에 넣는다 (요청 처리를 막지 않게 뒤에서)."""
+    while True:
+        url = await asyncio.to_thread(_ask_tunnel)
+        if url and url != config.TUNNEL_URL:
+            config.TUNNEL_URL = url
+            print(f'[터널] 방문객 받기 주소: {url}', flush=True)
+        await asyncio.sleep(15)
+
+
 async def _cleanup_loop():
     while True:
         await asyncio.to_thread(storage.cleanup)
@@ -45,6 +66,8 @@ async def lifespan(_):
     await asyncio.to_thread(compose.warmup)
     # AI 빛 보정은 있으면 쓰고 없으면 그냥 끈다 (촬영 흐름과 무관하게 뒤에서 돈다)
     tasks = [asyncio.create_task(_cleanup_loop()), *await ai.start(_compose_gate)]
+    if config.TUNNEL_METRICS:
+        tasks.append(asyncio.create_task(_watch_tunnel()))
     yield
     for task in tasks:
         task.cancel()
@@ -153,6 +176,8 @@ def get_config():
         },
         'defaultMessage': config.DEFAULT_MESSAGE,
         # 외부로 사진이 나가는 기능(외부 빛 보정 엔진이나 GPT 효과)이 켜져 있으면 처음 화면에 안내가 뜬다
+        # 방문객 휴대폰이 사진을 받을 주소 (비상용 노트북 서버는 임시 터널 주소가 잡혀야 QR이 맞다)
+        'public': config.public_base_url(),
         'ai': {**ai.info(), 'external': ai.external() or effects.enabled()},
         'effects': effects.catalog(),
     }

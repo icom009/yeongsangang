@@ -77,6 +77,10 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose
 - **IC-Light 컨테이너**는 처음 켤 때 모델 약 6GB를 내려받습니다(`ai_cache` 볼륨). 준비되기 전에는 `/health`가 503이라 부스는 AI 없이 돌다가, 준비되면 저절로 붙습니다.
 - **외부 API**를 쓰면 얼굴 사진이 바깥 서버로 나가므로 처음 화면에 안내 문구가 자동으로 뜹니다.
 
+**노트북 부스 (지금 운영 방식)**
+
+노트북 카메라로 찍고 방문객은 QR로 자기 데이터를 써서 받습니다. 평소엔 노트북 크롬으로 `https://ysg26.cloud`를 열기만 하고(`scripts\laptop\open-booth.bat`), 집 서버가 안 될 때는 노트북에서 부스 서버와 Cloudflare 임시 터널을 직접 켭니다(`scripts\laptop\start-fallback.bat`, `docker-compose.laptop.yml`). 서버가 터널 주소를 스스로 알아내 QR에 넣고, 터널로는 방문객 받기 화면만 열립니다. 순서는 [docs/laptop-booth.md](docs/laptop-booth.md).
+
 **플랜 B: 현장 노트북 + 공유기 (인터넷 없이)**
 
 ```bash

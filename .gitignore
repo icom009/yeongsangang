@@ -8,3 +8,5 @@ certs/
 .env
 web/vendor/
 .env.local
+output-laptop/
+.env.laptop
