@@ -213,10 +213,22 @@ async function onCameraLost(reason) {
   } catch (e) {
     report('camera-restart', `${e?.name}: ${e?.message}`);
     toast('카메라가 끊겼어요. 화면을 한 번 눌러 주세요.');
-    addEventListener('pointerdown', () => live.restartCamera().catch(() => {}), { once: true });
+    retryOnTap();
   } finally {
     restarting = false;
   }
+}
+
+// 화면을 누르면 카메라를 다시 연다. 여러 번 끊겨도 기다리는 것은 하나만 둔다
+// (쌓이면 리스너가 늘고, 한 번 누를 때 카메라를 여러 번 열게 된다)
+let tapRetry = false;
+function retryOnTap() {
+  if (tapRetry) return;
+  tapRetry = true;
+  addEventListener('pointerdown', () => {
+    tapRetry = false;
+    live.restartCamera().catch(() => {});
+  }, { once: true });
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -235,7 +247,11 @@ function goHome() {
   if ($('#cutGuide').open) $('#cutGuide').close();
   music.finale(false);  // 완성 음악에서 다시 잔잔한 곡으로
   live?.stopCamera();
+  // 지난 방문객 사진을 숨은 화면에서도 내려 메모리를 돌려준다 (다음 사람에게 남아 있지 않게)
+  ['#resultImg', '#cardPhoto', '#finalImg', '#qrImg'].forEach((s) => $(s).removeAttribute('src'));
+  dropGrids();
   state.shotId = null;
+  state.shotUrl = state.plainUrl = null;
   state.busy = false;
   state.cuts = [];
   state.cutIndex = 0;
@@ -268,7 +284,8 @@ function buildPlaces() {
         <p class="deck-story"></p>
         <span class="btn btn-sail btn-lg deck-go">이곳에서 찍기</span>
       </div>`;
-    item.querySelector('img').src = `/bg/${b.id}.jpg?w=${wide ? 1600 : 800}`;
+    // 넓은 화면은 처음 화면·촬영 화면과 같은 주소(1600px)를 써서 같은 사진을 두 번 받아 두 벌 들고 있지 않게
+    item.querySelector('img').src = wide ? `/bg/${b.id}.jpg` : `/bg/${b.id}.jpg?w=800`;
     item.querySelector('.deck-label').textContent = b.name;
     item.querySelector('.deck-where').textContent = b.place;
     item.querySelector('.deck-name').textContent = b.name;
@@ -594,6 +611,13 @@ async function shoot() {
   }
 }
 
+// 네 컷 미리보기 그림(blob: 주소). 다시 찍거나 방문객이 바뀔 때 돌려준다 (안 그러면 한 명마다 몇 MB씩 남는다)
+let gridUrls = [];
+function dropGrids() {
+  gridUrls.forEach((u) => URL.revokeObjectURL(u));
+  gridUrls = [];
+}
+
 // 서버(frame.grid)와 같은 배치로 네 컷 미리보기를 만든다
 async function makeGrid(srcs) {
   const imgs = await Promise.all(srcs.map(loadImage));
@@ -619,10 +643,19 @@ async function makeGrid(srcs) {
     ctx.drawImage(im, (i % 2) * (cw + g) + (cw - w) / 2, ((i / 2) | 0) * (ch + g) + (ch - h) / 2, w, h);
     ctx.restore();
   });
-  return cv.toDataURL('image/jpeg', 0.92);
+  // toDataURL은 화면을 잠깐 멈추고 긴 글자열을 남긴다. JPEG은 뒤에서 만들고, 큰 캔버스 메모리는 바로 돌려준다
+  const blob = await new Promise((resolve, reject) => {
+    cv.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/jpeg', 0.92);
+  });
+  cv.width = 0;
+  cv.height = 0;
+  const url = URL.createObjectURL(blob);
+  gridUrls.push(url);
+  return url;
 }
 
 async function showResult() {
+  dropGrids();
   state.shotId = state.cuts[0].id;
   if (state.mode === 4) {
     $('#busyText').textContent = '네 컷을 한 장으로 모으는 중이에요';
@@ -677,6 +710,8 @@ function chosenShot() {
 
 function retake() {
   state.shotId = null;
+  state.shotUrl = state.plainUrl = null;
+  dropGrids();
   state.cuts = [];
   state.cutIndex = 0;
   state.jobs = [];
@@ -836,6 +871,11 @@ function bind() {
     state.picks = [];
     syncPicks();
   });
+  // Esc로 닫으면 고른 네 곳이 그대로 남아 장소를 더 담을 수 없게 되므로 '장소 다시 고르기'와 같게 처리한다
+  $('#cutGuide').addEventListener('cancel', (e) => {
+    e.preventDefault();
+    $('#guideCancel').click();
+  });
   $('#randomBtn').addEventListener('click', () => {
     const pool = state.cfg.backgrounds.map((b) => b.id);
     state.picks = [];
@@ -907,7 +947,8 @@ function onKey(e) {
   const right = e.code === 'ArrowRight' || e.code === 'ArrowDown';
   const act = (fn) => { e.preventDefault(); fn(); };
   if ($('#cutGuide').open) {
-    if (next && !e.target.closest('button')) act(() => $('#guideGo').click());
+    // 리모컨 '다음'(PageDown)은 초점이 어디 있든 시작. Enter·Space는 초점이 있는 단추가 처리한다(처음 초점은 '시작')
+    if (e.code === 'PageDown' || (next && !e.target.closest('button'))) act(() => $('#guideGo').click());
     else if (back) act(() => $('#guideCancel').click());
     return;
   }

@@ -85,8 +85,15 @@ export class LiveStage {
   }
 
   /* ---------- 카메라 ---------- */
-  // facing: 'user'(전면) | 'environment'(후면). 노트북처럼 방향 정보가 없으면 deviceId로 고른다
-  async startCamera({ deviceId = this.deviceId, facing = this.facing } = {}) {
+  // facing: 'user'(전면) | 'environment'(후면). 노트북처럼 방향 정보가 없으면 deviceId로 고른다.
+  // 겹쳐 불러도(끊김 복구와 화면 누르기가 겹칠 때 등) 한 번만 연다. 두 번 열면 먼저 연 카메라가
+  // 꺼지지 않은 채 남아 카메라와 메모리를 계속 잡는다
+  startCamera(opts) {
+    if (!this.opening) this.opening = this.openCamera(opts).finally(() => { this.opening = null; });
+    return this.opening;
+  }
+
+  async openCamera({ deviceId = this.deviceId, facing = this.facing } = {}) {
     if (this.stream && this.stream.active) {
       this.resume();
       return;
@@ -146,14 +153,28 @@ export class LiveStage {
   }
 
   /* ---------- 인물 분리 모델 ---------- */
-  async loadSegmenter(kind = IS_MOBILE ? 'mobile' : 'desktop') {
+  // 인물 분리 모델은 한 번만 올려 두고 방문객마다 다시 쓴다.
+  // 예전엔 시작할 때마다 새로 만들고 이전 것을 닫지 않아, 방문객이 늘수록 브라우저 메모리(WASM·GPU)가
+  // 쌓였다(실측: 7명 만에 크롬 전체 1.7GB -> 2.1GB, 이벤트 리스너도 한 명마다 2개씩)
+  async loadSegmenter(kind = this.lite ? 'mobile' : 'desktop') {
+    const model = kind === 'mobile' ? MODEL_MOBILE : MODEL_DESKTOP;
+    if (this.segmenter && this.model === model) return true;
+    if (this.loading) return this.loading;
+    this.loading = this.createSegmenter(kind, model).finally(() => { this.loading = null; });
+    return this.loading;
+  }
+
+  async createSegmenter(kind, model) {
     try {
-      const local = await fetch(`${MP_LOCAL}/vision_bundle.mjs`, { method: 'HEAD' }).then((r) => r.ok, () => false);
-      const base = local ? MP_LOCAL : MP_BASE;
-      const model = kind === 'mobile' ? MODEL_MOBILE : MODEL_DESKTOP;
+      if (!this.vision) {  // MediaPipe 코드·WASM 파일 위치는 한 번만 준비한다
+        const local = await fetch(`${MP_LOCAL}/vision_bundle.mjs`, { method: 'HEAD' }).then((r) => r.ok, () => false);
+        const base = local ? MP_LOCAL : MP_BASE;
+        const { FilesetResolver, ImageSegmenter } = await import(`${base}/vision_bundle.mjs`);
+        const fileset = await FilesetResolver.forVisionTasks(`${base}/wasm`);
+        this.vision = { ImageSegmenter, fileset, local };
+      }
+      const { ImageSegmenter, fileset, local } = this.vision;
       const modelUrl = local ? LOCAL_MODEL[kind] : model.url;
-      const { FilesetResolver, ImageSegmenter } = await import(`${base}/vision_bundle.mjs`);
-      const fileset = await FilesetResolver.forVisionTasks(`${base}/wasm`);
       const make = (delegate) => ImageSegmenter.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: modelUrl, delegate },
         runningMode: 'VIDEO',
@@ -166,9 +187,13 @@ export class LiveStage {
       } catch {
         seg = await make('CPU');
       }
-      // 모델과 마스크 뜻(0번이 사람인지 배경인지)을 한꺼번에 바꾼다
+      // 모델과 마스크 뜻(0번이 사람인지 배경인지)을 한꺼번에 바꾸고, 쓰던 모델은 닫아 메모리를 돌려준다
+      const old = this.segmenter;
       this.model = model;
       this.segmenter = seg;
+      if (old && old !== seg) {
+        try { old.close(); } catch { /* 무시 */ }
+      }
       return true;
     } catch (e) {
       console.warn('segmenter unavailable', e);
@@ -282,6 +307,7 @@ export class LiveStage {
       console.warn(e);
       // 계속 실패하면(GPU 문제 등) 합성을 끄고 카메라 화면만 보여 준다
       if (++this.segFails > 20) {
+        try { this.segmenter.close(); } catch { /* 이미 망가졌을 수 있다 */ }
         this.segmenter = null;
         this.mask = null;
         this.onSegmenterLost?.(String(e?.message || e));
@@ -331,10 +357,8 @@ export class LiveStage {
 
   async swapLite() {
     this.swapping = true;
-    this.lite = true;
-    const old = this.segmenter;
+    this.lite = true;  // 다음 방문객부터도 가벼운 모델 그대로 (createSegmenter가 쓰던 모델을 닫는다)
     if (await this.loadSegmenter('mobile')) {
-      try { old?.close(); } catch { /* 무시 */ }
       this.segCost = 0;
       this.slowCount = 0;
       this.prev = null;
@@ -424,7 +448,11 @@ export class LiveStage {
     if (this.mirror) x.setTransform(-1, 0, 0, 1, w, 0);
     x.drawImage(this.video, sx, sy, sw, sh, 0, 0, w, h);
     return new Promise((resolve, reject) => {
-      c.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/jpeg', 0.92);
+      c.toBlob((b) => {
+        c.width = 0;  // 최대 1920x1440 캔버스 메모리를 가비지 컬렉션을 기다리지 않고 바로 돌려준다
+        c.height = 0;
+        if (b) resolve(b); else reject(new Error('toBlob failed'));
+      }, 'image/jpeg', 0.92);
     });
   }
 }
