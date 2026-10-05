@@ -144,6 +144,10 @@ docker compose --env-file .env.local up -d        # 부스 화면: http://localh
   - 방문객 300명이 동시에 사진을 받아도 2초 안에 끝났습니다. 실제로는 서버 쪽 인터넷 업로드 속도가 한계입니다(사진 한 장 약 0.7MB).
 - **행사 기간 체크:** 절전·화면 꺼짐 끄기, OS 자동 업데이트 재부팅 미루기. `restart: unless-stopped`로 Docker가 켜지면 자동 시작됩니다.
 
+## 배경 음악
+
+체험 내내 잔잔한 곡 4개(Kevin MacLeod, CC BY 4.0)가 돌아가며 나오고(`web/music.js`), 촬영 카운트다운 동안은 소리를 낮추며, 완성 화면에서는 완성 음악(`bgm/bgm1.mp3`)으로 바뀝니다. 왼쪽 아래 단추나 키보드 **M**으로 끄고 켤 수 있고, 그 설정은 기억됩니다. 곡 출처와 바꾸는 방법은 [bgm/CREDITS.md](bgm/CREDITS.md). CC BY 4.0은 출처 표기가 조건이라 처음 화면 왼쪽 아래에 곡 이름과 출처를 적어 둡니다.
+
 ## 환경 변수
 
 | 이름 | 기본값 | 설명 |
@@ -196,7 +200,7 @@ booth/records.py   완성 사진 이력 (output/records.jsonl)
 booth/mail.py      관리 화면의 메일 재전송 (선택)
 booth/effects.py   휴대폰 'AI로 바꿔 보기' 버튼, GPT 이미지 편집 (선택·유료)
 services/ic-light/ IC-Light 재조명 서비스 (GPU 컨테이너, 선택)
-web/               화면 (index.html, app.js, live.js, sound.js, app.css, photo.html, manage.html)
+web/               화면 (index.html, app.js, live.js, music.js, sound.js, app.css, photo.html, manage.html)
 ```
 
 배경을 추가하려면 `backgrounds/bg_N.png`를 넣고 `booth/config.py`의 `BACKGROUNDS`에 이름·장소·이야기와 `look`(해 위치, 빛 색 등)을 추가합니다.

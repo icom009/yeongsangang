@@ -43,6 +43,8 @@
     <p class="intro-notice" id="aiNotice" hidden>AI 빛 보정 버전을 함께 만들어요. 이때 사진이 외부 AI 서비스로 전송됩니다.</p>
   </div>
   <p class="intro-caption" id="introCaption" aria-hidden="true"></p>
+  <!-- 배경 음악 출처 (CC BY 4.0은 출처 표기가 조건) -->
+  <p class="intro-credit">음악: Carefree · Life of Riley · Fretless · Sunshine — Kevin MacLeod (incompetech.com), CC BY 4.0</p>
 </section>
 
 <!-- 네 컷 안내 -->
@@ -209,5 +211,9 @@
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script type="module" src="/static/app.js"></script>
+<audio id="music" preload="auto"></audio>
+<button class="music-btn" id="musicBtn" type="button" aria-pressed="false" aria-label="배경 음악 끄기" title="배경 음악 끄기·켜기 (M)">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path class="on" d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/><path class="off" d="M4 9v6h4l5 4V5L8 9H4zm12.6 3 2.7-2.7-1.4-1.4-2.7 2.7-2.7-2.7-1.4 1.4 2.7 2.7-2.7 2.7 1.4 1.4 2.7-2.7 2.7 2.7 1.4-1.4z"/></svg>
+</button>
 </body>
 </html>

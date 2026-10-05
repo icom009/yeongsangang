@@ -1,5 +1,6 @@
 import { LiveStage } from './live.js';
 import { sound } from './sound.js';
+import { createMusic } from './music.js';
 
 const $ = (s) => document.querySelector(s);
 const IDLE_MS = 120_000;      // 아무 조작이 없으면 처음 화면으로
@@ -34,6 +35,7 @@ const state = {
 };
 
 let live = null;
+let music = null;  // 배경 음악 (init에서 만든다)
 let idleTimer = 0;
 let takeTimer = 0;
 
@@ -145,6 +147,7 @@ async function start() {
   btn.textContent = '카메라를 켜는 중…';
   sound.unlock();
   unlockBgm();
+  music.start();  // 화면을 누른 순간이라 브라우저가 소리를 허락한다
   try {
     if (!live) {
       live = new LiveStage($('#stageCanvas'));
@@ -230,8 +233,7 @@ function goHome() {
   clearTimeout(idleTimer);
   clearInterval(takeTimer);
   if ($('#cutGuide').open) $('#cutGuide').close();
-  const bgm = $('#bgm');
-  bgm.pause();
+  music.finale(false);  // 완성 음악에서 다시 잔잔한 곡으로
   live?.stopCamera();
   state.shotId = null;
   state.busy = false;
@@ -475,6 +477,8 @@ function rotateTips(el, tips, ms = 2400) {
 
 async function countdown(sec) {
   const cd = $('#countdown');
+  music.duck(true);  // 삐 소리가 잘 들리게 음악을 잠깐 낮춘다 (셔터 소리 뒤 되돌린다)
+  setTimeout(() => music.duck(false), sec * 1000 + 900);
   for (let n = sec; n > 0; n--) {
     cd.textContent = n;
     cd.classList.remove('tick');
@@ -784,11 +788,7 @@ function enterTake(res) {
   show('take');
   live?.stopCamera();
 
-  const bgm = $('#bgm');
-  bgm.currentTime = 0;
-  bgm.volume = 0.85;
-  bgm.muted = $('#muteBtn').getAttribute('aria-pressed') === 'true';
-  bgm.play().catch(() => {});
+  music.finale(true);  // 잔잔한 곡을 줄이고 완성 음악으로
 
   setTimeout(() => {
     const img = $('#qrImg');
@@ -808,11 +808,17 @@ function enterTake(res) {
 }
 
 function toggleMute() {
-  const btn = $('#muteBtn');
-  const muted = btn.getAttribute('aria-pressed') !== 'true';
-  btn.setAttribute('aria-pressed', String(muted));
-  btn.textContent = muted ? '음악 켜기' : '음악 끄기';
-  $('#bgm').muted = muted;
+  music.setMuted(!music.muted);
+  syncMuteButtons();
+}
+
+// 받기 화면의 '음악 끄기'와 왼쪽 아래 단추가 같은 상태를 보이게
+function syncMuteButtons() {
+  const m = music.muted;
+  $('#muteBtn').setAttribute('aria-pressed', String(m));
+  $('#muteBtn').textContent = m ? '음악 켜기' : '음악 끄기';
+  $('#musicBtn').setAttribute('aria-pressed', String(m));
+  $('#musicBtn').setAttribute('aria-label', m ? '배경 음악 켜기' : '배경 음악 끄기');
 }
 
 /* ---------- 연결 ---------- */
@@ -848,6 +854,7 @@ function bind() {
   $('#finishBtn').addEventListener('click', finish);
   $('#doneBtn').addEventListener('click', goHome);
   $('#muteBtn').addEventListener('click', toggleMute);
+  $('#musicBtn').addEventListener('click', toggleMute);
   $('#msgInput').addEventListener('input', onMsgInput);
   $('#prevPlace').addEventListener('click', () => stepBg(-1));
   $('#nextPlace').addEventListener('click', () => stepBg(1));
@@ -912,6 +919,7 @@ function onKey(e) {
     }
     return;
   }
+  if (e.code === 'KeyM') return act(toggleMute);  // 운영자용: 배경 음악 끄기·켜기
   // 단추나 장소 카드에 초점이 있으면 Enter·Space는 그쪽이 처리한다 (두 번 눌리지 않게)
   if ((e.code === 'Enter' || e.code === 'Space') && e.target.closest('button, a, .deck-item')) return;
   if (scr === 'intro') {
@@ -940,7 +948,16 @@ function onKey(e) {
 }
 
 async function init() {
+  music = createMusic($('#music'), $('#bgm'));
   bind();
+  syncMuteButtons();
+  // 처음 화면부터 음악이 흐르게. 키오스크 크롬은 바로 되고, 보통 브라우저는 첫 터치·키 입력 때 시작한다
+  music.start();
+  const kick = () => {
+    music.start();
+    if (music.started) ['pointerdown', 'keydown'].forEach((ev) => removeEventListener(ev, kick));
+  };
+  ['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, kick, { passive: true }));
   try {
     state.cfg = await api('/api/config');
   } catch (e) {
