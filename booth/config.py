@@ -126,23 +126,9 @@ def gpt_ready():
     return bool(OPENAI_KEY)
 
 
-# 관리 화면(/manage) 비밀번호. 사진 이력을 보고 다시 보내는 곳이라 현장에서 꼭 바꿔 쓰세요
+# 관리 화면(/manage) 비밀번호. 사진 이력을 보고 링크·QR을 다시 꺼내는 곳이라 현장에서 꼭 바꿔 쓰세요
 # (compose가 빈 값을 넘길 수 있으므로 비어 있으면 기본값으로 되돌린다. 빈 비밀번호는 절대 두지 않는다)
 MANAGE_KEY = os.environ.get('YS_MANAGE_KEY') or 'ysg2026!'
-
-# 관리 화면에서 사진을 메일로 다시 보낼 때 쓰는 계정. 비우면 메일 보내기 단추가 꺼진다
-# (Gmail이면 2단계 인증 뒤 '앱 비밀번호'를 YS_SMTP_PASS에 넣는다)
-SMTP_HOST = os.environ.get('YS_SMTP_HOST', '')
-SMTP_PORT = int(os.environ.get('YS_SMTP_PORT') or 587)
-SMTP_USER = os.environ.get('YS_SMTP_USER', '')
-SMTP_PASS = os.environ.get('YS_SMTP_PASS', '')
-SMTP_FROM = os.environ.get('YS_SMTP_FROM', '') or SMTP_USER
-SMTP_SECURITY = os.environ.get('YS_SMTP_SECURITY') or 'starttls'  # starttls | ssl | none
-
-
-def mail_ready():
-    return bool(SMTP_HOST and SMTP_FROM)
-
 
 # 합성 결과 크기. 프레임 사진 칸(876x660)과 같은 4:3 비율
 SHOT_W, SHOT_H = 1600, 1200

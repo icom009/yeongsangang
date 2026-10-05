@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from booth import ai, compose, config, effects, frame, mail, records, storage
+from booth import ai, compose, config, effects, frame, records, storage
 
 # 실시간 미리보기 모듈(.mjs)·wasm을 브라우저가 받아들이도록 형식을 명시 (OS마다 기본값이 다르다)
 mimetypes.add_type('text/javascript', '.mjs')
@@ -347,7 +347,7 @@ def qr(sid: str, request: Request):
 
 
 # ---------- 관리 화면 (/manage) ----------
-# 사진 이력을 보고, 링크·QR을 다시 꺼내고, 메일로 다시 보내고, 지우는 곳.
+# 사진 이력을 보고, 링크·QR을 다시 꺼내고, 지우는 곳.
 # 공개 주소로도 열리므로(YS_OPEN=1) 비밀번호가 유일한 자물쇠다. 현장에서 꼭 바꿔 쓸 것
 MANAGE_COOKIE = 'ys_manage'
 # 비밀번호를 5번 틀린 기기는 1시간 동안 로그인할 수 없다.
@@ -374,11 +374,6 @@ def _need_manage(request: Request):
 
 class LoginBody(BaseModel):
     password: str = Field('', max_length=200)
-
-
-class MailBody(BaseModel):
-    to: str = Field('', max_length=200)
-    attach: bool = True
 
 
 def _device(request: Request):
@@ -441,7 +436,6 @@ def manage_status(request: Request):
         **records.stats(),
         'compose': {'slots': config.COMPOSE_SLOTS, 'busy': _busy},
         'ai': ai.queue_info(),
-        'mail': config.mail_ready(),
         'keepHours': config.KEEP_HOURS,
         'gpt': {**effects.usage(), 'on': effects.enabled()},
     }
@@ -479,25 +473,6 @@ async def manage_delete(sid: str, request: Request):
     files = await asyncio.to_thread(storage.remove, sid)
     await asyncio.to_thread(records.remove, sid)
     return {'ok': True, 'files': files}
-
-
-@app.post('/api/manage/shots/{sid}/mail')
-async def manage_mail(sid: str, body: MailBody, request: Request):
-    """사진을 메일로 다시 보낸다. 설정이 없으면 관리 화면에서 단추가 꺼져 있다."""
-    _need_manage(request)
-    final = _need(sid, 'final')
-    to = body.to.strip()
-    if '@' not in to or len(to) < 5:
-        raise HTTPException(400, '메일 주소를 다시 확인해 주세요.')
-    if not config.mail_ready():
-        raise HTTPException(400, '메일 설정(YS_SMTP_*)이 없어요. 링크 복사나 QR을 쓰세요.')
-    data = await asyncio.to_thread(final.read_bytes) if body.attach else None
-    try:
-        await asyncio.to_thread(mail.send, to, f'{base_url(request)}/p/{sid}', data)
-    except Exception as e:
-        print(f'[메일] 실패 {sid} -> {to}: {e}', flush=True)
-        raise HTTPException(502, '메일을 보내지 못했어요. 설정을 확인해 주세요.')
-    return {'ok': True}
 
 
 @app.get('/p/{sid}/ai')

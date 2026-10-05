@@ -46,13 +46,8 @@ services:
       YS_GPT_MODEL: ${YS_GPT_MODEL:-}
       YS_GPT_QUALITY: ${YS_GPT_QUALITY:-}
       YS_GPT_DAILY: ${YS_GPT_DAILY:-}
-      # 관리 화면(/manage) 비밀번호와 메일 재전송 설정
+      # 관리 화면(/manage) 비밀번호
       YS_MANAGE_KEY: ${YS_MANAGE_KEY:-}
-      YS_SMTP_HOST: ${YS_SMTP_HOST:-}
-      YS_SMTP_PORT: ${YS_SMTP_PORT:-587}
-      YS_SMTP_USER: ${YS_SMTP_USER:-}
-      YS_SMTP_PASS: ${YS_SMTP_PASS:-}
-      YS_SMTP_FROM: ${YS_SMTP_FROM:-}
     volumes:
       - ./output:/app/output   # 사진은 컨테이너를 지워도 남도록 이 폴더에 저장
     logging: *logging

@@ -111,15 +111,14 @@ docker compose --env-file .env.local up -d        # 부스 화면: http://localh
 
 **관리 화면 `/manage`**
 
-완성된 사진의 이력을 보고, 받기 링크·QR을 다시 꺼내고, 메일로 다시 보내고, 지우는 곳입니다.
+완성된 사진의 이력을 보고, 받기 링크·QR을 다시 꺼내고, 지우는 곳입니다.
 
 - 주소는 `https://<도메인>/manage` (현장 노트북이면 `http://localhost:8080/manage`). 열면 비밀번호 창이 뜹니다.
-- **비밀번호는 `YS_MANAGE_KEY`입니다. 기본값(`ysg2026!`)을 그대로 쓰지 말고 `.env`에서 바꾸세요.** 공개 주소로도 열리는 화면이라 비밀번호가 유일한 자물쇠입니다(5분에 10번 틀리면 잠깁니다).
-- 보이는 것: 시간, 장소, 한마디, 완성 사진, 빛 필터/원본, AI 빛 보정 여부, 사진 ID. 방문객 이름·연락처는 받지도 남기지도 않습니다.
-- 할 수 있는 것: QR 다시 보기, 링크 복사, 사진 저장, **메일로 다시 보내기**(받는 사람 주소를 그때 입력), 삭제(사진 파일과 기록을 함께 지우고 방문객 링크도 닫힙니다).
-- 위쪽 숫자는 지금 서버가 지고 있는 일입니다: `합성 자리 1/3`(동시에 합성 중인 사진), `AI 대기 2`(빛 보정 대기줄).
+- **비밀번호는 `YS_MANAGE_KEY`입니다. 기본값(`ysg2026!`)을 그대로 쓰지 말고 `.env`에서 바꾸세요.** 공개 주소로도 열리는 화면이라 비밀번호가 유일한 자물쇠입니다(5번 틀린 기기는 1시간 동안 들어올 수 없습니다).
+- 보이는 것: 시간, 장소, 한마디, AI 빛 보정 여부. 사진은 '사진 보기'를 눌렀을 때만 뜨고, QR 창에는 사진 없이 QR만 나옵니다(옆 사람이 화면을 봐도 괜찮게). 방문객 이름·연락처는 받지도 남기지도 않습니다.
+- 할 수 있는 것: QR 다시 보기, 링크 복사(문자·메신저로 직접 보낼 때), 삭제(사진 파일과 기록을 함께 지우고 방문객 링크도 닫힙니다).
+- 위쪽 숫자는 지금 서버가 지고 있는 일입니다: `합성 1/2`(동시에 합성 중인 사진 / 자리), `AI 대기 2`(빛 보정 대기줄), `GPT 오늘 3/500장`(휴대폰 AI 효과를 만든 장수와 실제 비용).
 - 이력은 `output/records.jsonl`에 한 줄씩 쌓이고, 사진이 보관 기간을 넘겨 지워질 때 함께 정리됩니다.
-- 메일을 쓰려면 `.env`에 `YS_SMTP_*`를 채웁니다(Gmail이면 2단계 인증 뒤 '앱 비밀번호'). 비워 두면 메일 단추만 꺼지고 QR·링크는 그대로 씁니다.
 
 **여러 명이 한꺼번에 찍을 때**
 
@@ -179,11 +178,6 @@ docker compose --env-file .env.local up -d        # 부스 화면: http://localh
 | `YS_GPT_QUALITY` | medium | `low`·`medium`·`high` |
 | `YS_GPT_DAILY` | 500 | 하루 최대 생성 장수(비용 상한, 네 컷은 4장) |
 | `YS_MANAGE_KEY` | `ysg2026!` | 관리 화면(`/manage`) 비밀번호. **현장에서 꼭 바꾸세요** |
-| `YS_SMTP_HOST` | 없음 | 메일 재전송용 SMTP 서버 (예: `smtp.gmail.com`). 비우면 메일 단추가 꺼집니다 |
-| `YS_SMTP_PORT` | 587 | SMTP 포트 |
-| `YS_SMTP_USER` / `YS_SMTP_PASS` | 없음 | SMTP 계정과 비밀번호 (Gmail은 '앱 비밀번호') |
-| `YS_SMTP_FROM` | `YS_SMTP_USER` | 보내는 사람 주소 |
-| `YS_SMTP_SECURITY` | starttls | `starttls`·`ssl`·`none` |
 
 Render(`RENDER_EXTERNAL_URL`)와 Hugging Face Spaces(`SPACE_HOST`)에서는 외부 주소를 자동으로 잡습니다.
 
@@ -197,7 +191,6 @@ booth/storage.py   사진 파일 관리, 자동 정리
 booth/config.py    배경 목록, 프레임 좌표, 설정
 booth/ai.py        생성형 AI 빛 보정 (선택, 뒤에서 돈다)
 booth/records.py   완성 사진 이력 (output/records.jsonl)
-booth/mail.py      관리 화면의 메일 재전송 (선택)
 booth/effects.py   휴대폰 'AI로 바꿔 보기' 버튼, GPT 이미지 편집 (선택·유료)
 services/ic-light/ IC-Light 재조명 서비스 (GPU 컨테이너, 선택)
 web/               화면 (index.html, app.js, live.js, music.js, sound.js, app.css, photo.html, manage.html)

@@ -66,11 +66,10 @@
     dialog .inner { padding: 22px; display: flex; flex-direction: column; gap: 12px; }
     dialog h2 { margin: 0; font-size: 1.05rem; }
     dialog p { margin: 0; color: var(--text-dim); font-size: .88rem; }
-    dialog input[type="password"], dialog input[type="email"] {
+    dialog input[type="password"] {
       padding: 12px 14px; border-radius: 12px; background: rgba(0, 0, 0, .25);
       border: 1px solid var(--glass-line); color: var(--text); font: inherit;
     }
-    dialog label { display: flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: .88rem; }
     dialog .row2 { display: flex; gap: 8px; }
     dialog .row2 .btn { flex: 1; }
     dialog .err { color: #ffb4a8; font-size: .86rem; min-height: 1.1em; }
@@ -127,24 +126,10 @@
   </div>
 </dialog>
 
-<dialog id="mailDlg">
-  <form class="inner" id="mailForm">
-    <h2>메일로 다시 보내기</h2>
-    <p id="mailWhen"></p>
-    <input type="email" id="mailTo" placeholder="받는 사람 메일 주소" required>
-    <label><input type="checkbox" id="mailAttach" checked> 사진 파일도 첨부하기</label>
-    <p class="err" id="mailErr"></p>
-    <div class="row2">
-      <button class="btn btn-sail btn-sm" id="mailSend" type="submit">보내기</button>
-      <button class="btn btn-glass btn-sm" id="mailClose" type="button">닫기</button>
-    </div>
-  </form>
-</dialog>
-
 <script>
   const $ = (s) => document.querySelector(s);
   const PAGE = 30;
-  const state = { offset: 0, total: 0, q: '', mail: false };
+  const state = { offset: 0, total: 0, q: '' };
   let cur = null;
 
   function toast(msg) {
@@ -244,7 +229,6 @@
   /* ---------- 요약 ---------- */
   async function loadStatus() {
     const s = await api('/api/manage/status');
-    state.mail = s.mail;
     const ai = s.ai.engine === 'off' ? 'AI 꺼짐' : `AI 대기 ${s.ai.waiting}${s.ai.running ? '+1' : ''}`;
     // GPT 효과: 오늘 만든 장수와 실제 사용 토큰으로 셈한 금액 (1달러 = 1,400원으로 어림)
     const gpt = s.gpt && s.gpt.on
@@ -270,14 +254,12 @@
         <span class="acts">
           ${it.alive ? '<button class="btn btn-glass" data-act="peek" type="button">사진 보기</button>' : ''}
           ${it.alive ? '<button class="btn btn-glass" data-act="qr" type="button">QR·링크</button>' : ''}
-          ${it.alive ? '<button class="btn btn-glass" data-act="mail" type="button">메일</button>' : ''}
           <button class="btn btn-glass danger" data-act="del" type="button">삭제</button>
         </span>
       </div>
       <div class="peek" hidden><img alt="완성된 사진"></div>`;
     el.querySelector('[data-act="peek"]')?.addEventListener('click', (e) => togglePeek(it, el, e.currentTarget));
     el.querySelector('[data-act="qr"]')?.addEventListener('click', () => openQr(it));
-    el.querySelector('[data-act="mail"]')?.addEventListener('click', () => openMail(it));
     el.querySelector('[data-act="del"]').addEventListener('click', () => remove(it, el));
     return el;
   }
@@ -320,38 +302,6 @@
       toast('링크를 복사했어요.');
     } catch {
       toast('복사가 안 돼요. 주소를 직접 선택해 주세요.');
-    }
-  });
-
-  /* ---------- 메일 ---------- */
-  function openMail(it) {
-    cur = it;
-    hideAll();
-    $('#mailErr').textContent = state.mail ? '' : '메일 설정(YS_SMTP_*)이 없어요. QR·링크를 쓰세요.';
-    $('#mailSend').disabled = !state.mail;
-    $('#mailWhen').textContent = `${fmtWhen(it.t)} · ${it.place || ''}`;
-    $('#mailDlg').showModal();
-    $('#mailTo').focus();
-  }
-  $('#mailClose').addEventListener('click', () => $('#mailDlg').close());
-  $('#mailForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = $('#mailSend');
-    btn.disabled = true;
-    btn.textContent = '보내는 중…';
-    try {
-      await api(`/api/manage/shots/${cur.id}/mail`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: $('#mailTo').value, attach: $('#mailAttach').checked }),
-      });
-      $('#mailDlg').close();
-      toast('메일을 보냈어요.');
-    } catch (err) {
-      if (err.message !== '401') $('#mailErr').textContent = err.message;
-    } finally {
-      btn.disabled = false;
-      btn.textContent = '보내기';
     }
   });
 
