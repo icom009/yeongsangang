@@ -747,20 +747,67 @@ function messageLines() {
   return lines.length ? lines : [state.cfg.defaultMessage];
 }
 
-// 서버(frame.py)와 같은 규칙으로 글자 크기를 정해 미리보기와 결과물이 같게 보이도록 한다
+// 한 줄을 폭에 맞춰 나눈다. 띄어쓰기에서 나누고, 한 어절이 폭보다 길면 글자 단위로 (frame.py의 _wrap과 같게)
+function wrapLine(text, width, measure) {
+  const lines = [];
+  let cur = '';
+  for (const word of text.split(' ')) {
+    if (!word) continue;
+    const cand = cur ? `${cur} ${word}` : word;
+    if (measure(cand) <= width) {
+      cur = cand;
+      continue;
+    }
+    if (cur) {
+      lines.push(cur);
+      cur = '';
+    }
+    for (const ch of word) {
+      if (cur && measure(cur + ch) > width) {
+        lines.push(cur);
+        cur = ch;
+      } else {
+        cur += ch;
+      }
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+// 줄 수는 그대로 두고 폭을 좁혀 줄 길이를 고르게 (frame.py의 _balance와 같게)
+function balanceLine(text, width, measure) {
+  const n = wrapLine(text, width, measure).length;
+  let lo = 1;
+  let hi = Math.floor(width);
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (wrapLine(text, mid, measure).length <= n) hi = mid; else lo = mid + 1;
+  }
+  return wrapLine(text, hi, measure);
+}
+
+// 서버(frame.layout_message)와 같은 규칙으로 글자 크기와 줄을 정해 미리보기와 결과물이 같게 보이도록 한다.
+// 긴 줄은 상자 폭에 맞춰 나눈다 (예전엔 한 줄로 길게 쓰면 폭에 맞추느라 글자가 아주 작아졌다)
 function fitMessage() {
   const f = state.cfg.frame;
   const [tx1, ty1, tx2, ty2] = f.text;
   const bw = tx2 - tx1;
   const bh = ty2 - ty1;
-  const lines = messageLines();
+  const paras = messageLines();
+  const measureAt = (size) => {
+    measureCtx.font = `${size}px 'Ownglyph PDH'`;
+    return (t) => measureCtx.measureText(t).width;
+  };
   let size = 72;
   while (size > 22) {
-    measureCtx.font = `${size}px 'Ownglyph PDH'`;
-    const widest = Math.max(...lines.map((l) => measureCtx.measureText(l).width));
-    if (widest <= bw && size * 1.25 * lines.length <= bh) break;
+    const measure = measureAt(size);
+    const n = paras.reduce((sum, p) => sum + wrapLine(p, bw, measure).length, 0);
+    if (n * size * 1.25 <= bh) break;
     size -= 2;
   }
+  const measure = measureAt(size);
+  const lines = paras.flatMap((p) => balanceLine(p, bw, measure));
   const el = $('#cardText');
   el.textContent = lines.join('\n');
   el.style.fontSize = `${(size / f.size[0]) * 100}cqw`;

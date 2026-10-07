@@ -26,8 +26,65 @@ def _font(size):
 
 
 def clean_message(msg):
+    """방문객이 직접 나눈 줄(최대 3줄). 긴 줄은 layout_message가 상자 폭에 맞춰 다시 나눈다."""
     lines = [x.strip() for x in (msg or '').splitlines() if x.strip()][:3]
     return lines or [config.DEFAULT_MESSAGE]
+
+
+# 한마디 글자 크기: 72px부터 2씩 줄여 상자에 들어가는 가장 큰 크기. web/app.js의 fitMessage()와 같은 규칙
+MSG_MAX, MSG_MIN, MSG_LINE = 72, 22, 1.25
+
+
+def _wrap(text, width, measure):
+    """한 줄을 폭에 맞춰 나눈다. 띄어쓰기에서 나누고, 한 어절이 폭보다 길면 글자 단위로 나눈다."""
+    lines, cur = [], ''
+    for word in text.split(' '):
+        if not word:
+            continue
+        cand = f'{cur} {word}' if cur else word
+        if measure(cand) <= width:
+            cur = cand
+            continue
+        if cur:
+            lines.append(cur)
+            cur = ''
+        for ch in word:
+            if cur and measure(cur + ch) > width:
+                lines.append(cur)
+                cur = ch
+            else:
+                cur += ch
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _balance(text, width, measure):
+    """줄 수는 그대로 두고 폭을 좁혀 줄 길이를 고르게 (마지막 줄에 한 어절만 남지 않게)."""
+    lines = _wrap(text, width, measure)
+    lo, hi = 1, int(width)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if len(_wrap(text, mid, measure)) <= len(lines):
+            hi = mid
+        else:
+            lo = mid + 1
+    return _wrap(text, hi, measure)
+
+
+def layout_message(paragraphs, box_w, box_h, measure_at):
+    """상자에 들어가는 가장 큰 글자 크기와 그 크기로 나눈 줄들.
+    예전에는 직접 나눈 줄만 썼기 때문에, 한 줄로 길게 쓰면 폭에 맞추느라 글자가 아주 작아졌다.
+    measure_at(size)는 그 크기에서 글자열 폭을 재는 함수를 돌려준다."""
+    size = MSG_MAX
+    while size > MSG_MIN:
+        measure = measure_at(size)
+        lines = [x for p in paragraphs for x in _wrap(p, box_w, measure)]
+        if len(lines) * size * MSG_LINE <= box_h:
+            break
+        size -= 2
+    measure = measure_at(size)
+    return size, [x for p in paragraphs for x in _balance(p, box_w, measure)]
 
 
 def _rounded_mask(size, r):
@@ -85,21 +142,18 @@ def render(shots, message, out_path):
     for p, (x, y, w, h) in zip(paths, boxes):
         frame.paste(_fit(_open(p), w, h), (x, y), _rounded_mask((w, h), radius))
 
-    lines = clean_message(message)
     bx1, by1, bx2, by2 = config.FRAME_TEXT_BOX
     bw, bh = bx2 - bx1, by2 - by1
     d = ImageDraw.Draw(frame)
 
-    # 상자 안에 들어가는 가장 큰 글자 크기를 찾는다
-    size = 72
-    while size > 22:
-        font = _font(size)
-        lh = size * 1.25
-        widest = max(d.textlength(x, font=font) for x in lines)
-        if widest <= bw and lh * len(lines) <= bh:
-            break
-        size -= 2
-    lh = size * 1.25
+    # 상자 안에 들어가는 가장 큰 글자 크기를 찾고, 긴 줄은 상자 폭에 맞춰 나눈다
+    def measure_at(size):
+        f = _font(size)
+        return lambda text: d.textlength(text, font=f)
+
+    size, lines = layout_message(clean_message(message), bw, bh, measure_at)
+    font = _font(size)
+    lh = size * MSG_LINE
     top = by1 + (bh - lh * len(lines)) / 2 + lh / 2
     for i, x in enumerate(lines):
         d.text(((bx1 + bx2) / 2, top + i * lh), x, font=font,
