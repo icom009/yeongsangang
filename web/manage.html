@@ -55,7 +55,8 @@
     }
     .row.gone .place::after { content: ' · 삭제됨'; color: var(--text-faint); font-weight: 400; }
 
-    .more { display: grid; place-items: center; margin-top: 18px; }
+    .more { display: grid; place-items: center; margin-bottom: 12px; }
+    .more:has([hidden]) { display: none; }
 
     /* 단체 묶음: 한 명씩 찍은 사진을 골라 QR 하나로 */
     .row .pick { width: 20px; height: 20px; flex: none; margin: 0; accent-color: var(--sail); cursor: pointer; }
@@ -115,16 +116,16 @@
   <p class="sum" id="sum" hidden></p>
   <input type="search" id="search" placeholder="한마디·장소·사진 ID로 찾기" autocomplete="off" hidden>
 
-  <p class="hint" id="pickHint" hidden>단체로 한 명씩 찍었다면 왼쪽 네모를 골라 QR 하나로 묶을 수 있어요. Shift를 누른 채 고르면 그 사이를 한꺼번에 골라요.</p>
+  <p class="hint" id="pickHint" hidden>단체로 한 명씩 찍었다면 왼쪽 네모를 골라 QR 하나로 묶을 수 있어요. Shift를 누른 채 고르면 그 사이를 한꺼번에 골라요. 목록은 찍은 순서대로예요 (맨 아래가 가장 최근).</p>
 
   <section class="albums" id="albums" hidden>
     <h2>단체 묶음 QR</h2>
     <ul class="list" id="albumList"></ul>
   </section>
 
+  <div class="more"><button class="btn btn-glass" id="moreBtn" type="button" hidden>↑ 앞선 사진 더 보기</button></div>
   <ul class="list" id="list"></ul>
   <p class="empty" id="empty" hidden>아직 완성된 사진이 없어요.</p>
-  <div class="more"><button class="btn btn-glass" id="moreBtn" type="button" hidden>더 보기</button></div>
 </div>
 
 <div class="selbar" id="selbar" hidden>
@@ -318,14 +319,22 @@
     return el;
   }
 
+  // 목록은 찍은 순서대로 (위가 먼저, 맨 아래가 가장 최근). 서버는 최근 것부터 한 쪽씩 주므로 뒤집어 쓰고,
+  // '앞선 사진 더 보기'는 그보다 이전 쪽을 목록 위에 덧붙인다. 보고 있던 줄은 제자리에 둔다
   async function loadPage(reset) {
-    if (reset) {
-      state.offset = 0;
-      $('#list').innerHTML = '';
-    }
+    if (reset) state.offset = 0;
     const res = await api(`/api/manage/shots?offset=${state.offset}&limit=${PAGE}&q=${encodeURIComponent(state.q)}`);
     state.total = res.total;
-    res.items.forEach((it) => $('#list').appendChild(row(it)));
+    const have = new Set(reset ? [] : [...$('#list').children].map((r) => r.dataset.id));
+    const rows = res.items.filter((it) => !have.has(it.id)).reverse().map(row);
+    if (reset) {
+      $('#list').replaceChildren(...rows);
+    } else {
+      const first = $('#list').firstElementChild;
+      const top = first?.getBoundingClientRect().top;
+      $('#list').prepend(...rows);
+      if (first) scrollBy(0, first.getBoundingClientRect().top - top);
+    }
     syncSel();  // 찾기·더 보기 뒤에도 고른 표시가 남게
     state.offset += res.items.length;
     $('#empty').hidden = state.total > 0;
@@ -337,6 +346,7 @@
       await loadStatus();
       await loadPage(true);
       await loadAlbums();
+      scrollTo(0, document.documentElement.scrollHeight);  // 가장 최근 사진(맨 아래)이 바로 보이게
     } catch (e) {
       if (e.message !== '401') toast(e.message);
     }
@@ -463,6 +473,7 @@
     try {
       await api(`/api/manage/shots/${it.id}`, { method: 'DELETE' });
       el.remove();
+      state.offset = Math.max(0, state.offset - 1);
       sel.delete(it.id);
       syncSel();
       toast('지웠어요.');
