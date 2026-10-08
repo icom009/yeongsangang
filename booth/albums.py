@@ -64,12 +64,12 @@ def get(aid):
 
 
 def listing():
-    """관리 화면에 보여 줄 묶음 목록 (만든 순서대로, 아래가 최근)."""
+    """관리 화면에 보여 줄 묶음 목록 (최근 것부터)."""
     with _lock:
         data = _load()
     out = [{'id': k, 't': v['t'], 'title': v.get('title', ''), 'count': len(alive(v['ids']))}
            for k, v in data.items()]
-    return sorted(out, key=lambda r: r['t'])  # 같은 초에 만든 묶음은 만든 순서 그대로 (안정 정렬)
+    return sorted(out, key=lambda r: r['t'], reverse=True)
 
 
 def remove(aid):

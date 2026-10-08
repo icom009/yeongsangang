@@ -55,15 +55,24 @@
     }
     .row.gone .place::after { content: ' · 삭제됨'; color: var(--text-faint); font-weight: 400; }
 
-    .more { display: grid; place-items: center; margin-bottom: 12px; }
-    .more:has([hidden]) { display: none; }
+    .more { display: grid; place-items: center; margin-top: 18px; }
+
+    /* 일자별 머리글: 내려도 지금 보는 날짜가 위에 붙어 있게 (뒤 머리글이 앞 머리글을 덮는다) */
+    .list .day {
+      position: sticky; top: 0; z-index: 5; margin-top: 12px; padding: 10px 4px 8px;
+      background: var(--night); border-bottom: 1px solid var(--glass-line);
+      font-weight: 700; font-size: .98rem;
+    }
+    .list .day:first-child { margin-top: 0; }
+    .list .day small { margin-left: 8px; font-weight: 400; font-size: .8rem; color: var(--text-faint); }
+    .row .nopick { width: 20px; flex: none; }
+    .row.album { background: rgba(255, 210, 122, .05); border-style: dashed; }
+    .row .tag.group { color: var(--sail-hi); border-color: rgba(255, 210, 122, .4); }
 
     /* 단체 묶음: 한 명씩 찍은 사진을 골라 QR 하나로 */
     .row .pick { width: 20px; height: 20px; flex: none; margin: 0; accent-color: var(--sail); cursor: pointer; }
     .row.picked { border-color: rgba(255, 210, 122, .6); background: rgba(255, 210, 122, .08); }
     .hint { margin: -4px 0 14px; color: var(--text-faint); font-size: .84rem; }
-    .albums { margin: 0 0 18px; }
-    .albums h2 { margin: 0 0 8px; font-size: .95rem; color: var(--text-dim); }
     .selbar {
       position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%);
       z-index: 20; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -114,18 +123,13 @@
   </div>
 
   <p class="sum" id="sum" hidden></p>
-  <input type="search" id="search" placeholder="한마디·장소·사진 ID로 찾기" autocomplete="off" hidden>
+  <input type="search" id="search" placeholder="한마디·장소·묶음 이름·ID로 찾기" autocomplete="off" hidden>
 
-  <p class="hint" id="pickHint" hidden>단체로 한 명씩 찍었다면 왼쪽 네모를 골라 QR 하나로 묶을 수 있어요. Shift를 누른 채 고르면 그 사이를 한꺼번에 골라요. 목록은 찍은 순서대로예요 (맨 아래가 가장 최근).</p>
+  <p class="hint" id="pickHint" hidden>단체로 한 명씩 찍었다면 왼쪽 네모를 골라 QR 하나로 묶을 수 있어요. Shift를 누른 채 고르면 그 사이를 한꺼번에 골라요. 만든 묶음은 만든 시각에 맞춰 목록에 함께 보여요.</p>
 
-  <section class="albums" id="albums" hidden>
-    <h2>단체 묶음 QR</h2>
-    <ul class="list" id="albumList"></ul>
-  </section>
-
-  <div class="more"><button class="btn btn-glass" id="moreBtn" type="button" hidden>↑ 앞선 사진 더 보기</button></div>
   <ul class="list" id="list"></ul>
   <p class="empty" id="empty" hidden>아직 완성된 사진이 없어요.</p>
+  <div class="more"><button class="btn btn-glass" id="moreBtn" type="button" hidden>더 보기</button></div>
 </div>
 
 <div class="selbar" id="selbar" hidden>
@@ -174,7 +178,7 @@
 <script>
   const $ = (s) => document.querySelector(s);
   const PAGE = 30;
-  const state = { offset: 0, total: 0, q: '' };
+  const state = { offset: 0, total: 0, q: '', days: {}, lastDay: '' };
   let cur = null;
 
   function toast(msg) {
@@ -201,10 +205,23 @@
     return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   }
 
+  const two = (n) => String(n).padStart(2, '0');
+  const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
+
   function fmtWhen(t) {
     const d = new Date(t * 1000);
-    const two = (n) => String(n).padStart(2, '0');
     return `${two(d.getMonth() + 1)}.${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
+  }
+
+  // 목록 줄에는 시각만 (날짜는 일자별 머리글에)
+  function fmtTime(t) {
+    const d = new Date(t * 1000);
+    return `${two(d.getHours())}:${two(d.getMinutes())}`;
+  }
+
+  function dayKey(t) {
+    const d = new Date(t * 1000);
+    return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
   }
 
   /* ---------- 들어가기 ---------- */
@@ -246,8 +263,7 @@
   $('#lockBtn').addEventListener('click', async () => {
     await fetch('/api/manage/logout', { method: 'POST' });
     $('#list').innerHTML = '';
-    $('#albumList').innerHTML = '';
-    $('#sum').hidden = $('#search').hidden = $('#pickHint').hidden = $('#albums').hidden = true;
+    $('#sum').hidden = $('#search').hidden = $('#pickHint').hidden = true;
     sel.clear();
     syncSel();
     openLogin();
@@ -276,7 +292,7 @@
 
   /* ---------- 요약 ---------- */
   async function loadStatus() {
-    const s = await api('/api/manage/status');
+    const s = await api(`/api/manage/status?tz=${new Date().getTimezoneOffset()}`);
     const ai = s.ai.engine === 'off' ? 'AI 꺼짐' : `AI 대기 ${s.ai.waiting}${s.ai.running ? '+1' : ''}`;
     // GPT 효과: 오늘 만든 장수와 실제 사용 토큰으로 셈한 금액 (1달러 = 1,400원으로 어림)
     const gpt = s.gpt && s.gpt.on
@@ -293,13 +309,14 @@
 
   /* ---------- 목록 ---------- */
   function row(it) {
+    if (it.kind === 'album') return albumRow(it);
     const el = document.createElement('li');
     el.className = 'row' + (it.alive ? '' : ' gone');
     el.dataset.id = it.id;
     el.innerHTML = `
       <div class="top">
-        ${it.alive ? '<input type="checkbox" class="pick" aria-label="단체 묶음에 넣기">' : ''}
-        <span class="when">${fmtWhen(it.t)}</span>
+        ${it.alive ? '<input type="checkbox" class="pick" aria-label="단체 묶음에 넣기">' : '<span class="nopick"></span>'}
+        <span class="when">${fmtTime(it.t)}</span>
         <span class="place">${esc(it.place || '장소 미상')}</span>
         <span class="msg">${esc(it.msg || '')}</span>
         ${it.ai ? '<span class="tag ai">AI</span>' : ''}
@@ -319,22 +336,47 @@
     return el;
   }
 
-  // 목록은 찍은 순서대로 (위가 먼저, 맨 아래가 가장 최근). 서버는 최근 것부터 한 쪽씩 주므로 뒤집어 쓰고,
-  // '앞선 사진 더 보기'는 그보다 이전 쪽을 목록 위에 덧붙인다. 보고 있던 줄은 제자리에 둔다
+  /* ---------- 일자별 머리글 ---------- */
+  // 장수는 서버가 날짜별로 센 값 (아직 안 불러온 쪽까지 포함). 날짜는 이 브라우저의 시간대로 나눈다
+  function dayText(key) {
+    const [y, m, d] = key.split('-').map(Number);
+    const c = state.days[key] || { photos: 0, albums: 0 };
+    const today = key === dayKey(Date.now() / 1000) ? '오늘 · ' : '';
+    return `${today}${m}월 ${d}일 (${WEEK[new Date(y, m - 1, d).getDay()]})`
+      + `<small>${[c.photos && `사진 ${c.photos}장`, c.albums && `단체 묶음 ${c.albums}개`].filter(Boolean).join(' · ')}</small>`;
+  }
+
+  function dayHead(key) {
+    const li = document.createElement('li');
+    li.className = 'day';
+    li.dataset.day = key;
+    li.innerHTML = dayText(key);
+    return li;
+  }
+
+  // 사진과 단체 묶음이 한 목록에 최신 순으로 온다. 날짜가 바뀌는 곳마다 머리글을 넣는다
   async function loadPage(reset) {
-    if (reset) state.offset = 0;
-    const res = await api(`/api/manage/shots?offset=${state.offset}&limit=${PAGE}&q=${encodeURIComponent(state.q)}`);
-    state.total = res.total;
-    const have = new Set(reset ? [] : [...$('#list').children].map((r) => r.dataset.id));
-    const rows = res.items.filter((it) => !have.has(it.id)).reverse().map(row);
     if (reset) {
-      $('#list').replaceChildren(...rows);
-    } else {
-      const first = $('#list').firstElementChild;
-      const top = first?.getBoundingClientRect().top;
-      $('#list').prepend(...rows);
-      if (first) scrollBy(0, first.getBoundingClientRect().top - top);
+      state.offset = 0;
+      state.lastDay = '';
     }
+    const res = await api(`/api/manage/shots?offset=${state.offset}&limit=${PAGE}`
+      + `&q=${encodeURIComponent(state.q)}&tz=${new Date().getTimezoneOffset()}`);
+    state.total = res.total;
+    state.days = res.days;
+    // 열어 둔 사이 새 사진이 완성되면 쪽 경계가 밀려 이미 있는 줄이 다시 올 수 있다 → 걸러 낸다
+    const have = new Set(reset ? [] : [...document.querySelectorAll('#list .row')].map((r) => r.dataset.id));
+    const out = [];
+    for (const it of res.items) {
+      if (have.has(it.id)) continue;
+      const key = dayKey(it.t);
+      if (key !== state.lastDay) out.push(dayHead(key));
+      state.lastDay = key;
+      out.push(row(it));
+    }
+    if (reset) $('#list').replaceChildren(...out);
+    else $('#list').append(...out);
+    document.querySelectorAll('#list .day').forEach((h) => { h.innerHTML = dayText(h.dataset.day); });
     syncSel();  // 찾기·더 보기 뒤에도 고른 표시가 남게
     state.offset += res.items.length;
     $('#empty').hidden = state.total > 0;
@@ -345,8 +387,6 @@
     try {
       await loadStatus();
       await loadPage(true);
-      await loadAlbums();
-      scrollTo(0, document.documentElement.scrollHeight);  // 가장 최근 사진(맨 아래)이 바로 보이게
     } catch (e) {
       if (e.message !== '401') toast(e.message);
     }
@@ -403,36 +443,34 @@
     openQr(a, `단체 사진 QR · ${a.count}장`, `${fmtWhen(a.t)} · ${a.title || '이름 없는 묶음'}`);
   }
 
-  async function loadAlbums() {
-    const res = await api('/api/manage/albums');
-    $('#albumList').replaceChildren(...res.items.map((a) => {
-      const li = document.createElement('li');
-      li.className = 'row';
-      li.innerHTML = `
-        <div class="top">
-          <span class="when">${fmtWhen(a.t)}</span>
-          <span class="place">${esc(a.title || '이름 없는 묶음')}</span>
-          <span class="tag">${a.count}장</span>
-          <span class="acts">
-            <button class="btn btn-glass" data-act="qr" type="button">QR·링크</button>
-            <button class="btn btn-glass danger" data-act="del" type="button">묶음 삭제</button>
-          </span>
-        </div>`;
-      li.querySelector('[data-act="qr"]').addEventListener('click', () => openAlbumQr(a));
-      li.querySelector('[data-act="del"]').addEventListener('click', async () => {
-        if (!confirm(`'${a.title || '이름 없는 묶음'}' 묶음을 지울까요? 사진은 그대로 남고, 이 묶음 QR만 열리지 않게 돼요.`)) return;
-        try {
-          await api(`/api/manage/albums/${a.id}`, { method: 'DELETE' });
-          li.remove();
-          $('#albums').hidden = !$('#albumList').children.length;
-          toast('묶음을 지웠어요.');
-        } catch (e) {
-          if (e.message !== '401') toast(e.message);
-        }
-      });
-      return li;
-    }));
-    $('#albums').hidden = !res.items.length;
+  // 묶음도 만든 시각에 맞춰 같은 목록에 들어간다 (고르는 네모는 없다)
+  function albumRow(a) {
+    const li = document.createElement('li');
+    li.className = 'row album' + (a.alive ? '' : ' gone');
+    li.dataset.id = a.id;
+    li.innerHTML = `
+      <div class="top">
+        <span class="nopick"></span>
+        <span class="when">${fmtTime(a.t)}</span>
+        <span class="tag group">단체 묶음 ${a.count}장</span>
+        <span class="place">${esc(a.title || '이름 없는 묶음')}</span>
+        <span class="acts">
+          ${a.alive ? '<button class="btn btn-glass" data-act="qr" type="button">QR·링크</button>' : ''}
+          <button class="btn btn-glass danger" data-act="del" type="button">묶음 삭제</button>
+        </span>
+      </div>`;
+    li.querySelector('[data-act="qr"]')?.addEventListener('click', () => openAlbumQr(a));
+    li.querySelector('[data-act="del"]').addEventListener('click', async () => {
+      if (!confirm(`'${a.title || '이름 없는 묶음'}' 묶음을 지울까요? 사진은 그대로 남고, 이 묶음 QR만 열리지 않게 돼요.`)) return;
+      try {
+        await api(`/api/manage/albums/${a.id}`, { method: 'DELETE' });
+        dropRow(a, li);
+        toast('묶음을 지웠어요.');
+      } catch (e) {
+        if (e.message !== '401') toast(e.message);
+      }
+    });
+    return li;
   }
 
   $('#selClear').addEventListener('click', () => { sel.clear(); lastPick = null; syncSel(); });
@@ -459,7 +497,7 @@
       lastPick = null;
       syncSel();
       openAlbumQr(a);
-      loadAlbums().catch(() => {});
+      loadPage(true).then(() => scrollTo(0, 0)).catch(() => {});  // 새 묶음이 맨 위(오늘)에 보이게
     } catch (err) {
       if (err.message !== '401') $('#albumErr').textContent = err.message;
     } finally {
@@ -468,12 +506,26 @@
   });
 
   /* ---------- 삭제 ---------- */
+  // 줄을 빼고 그 날 머리글의 장수를 고친다. 그 날 남은 것이 없으면 머리글도 뺀다
+  function dropRow(it, el) {
+    el.remove();
+    state.offset = Math.max(0, state.offset - 1);  // 다음 쪽 시작점도 당긴다 (안 그러면 경계의 한 장을 건너뛴다)
+    state.total = Math.max(0, state.total - 1);
+    const key = dayKey(it.t);
+    const c = state.days[key];
+    const kind = it.kind === 'album' ? 'albums' : 'photos';
+    if (c) c[kind] = Math.max(0, c[kind] - 1);
+    const head = document.querySelector(`#list .day[data-day="${key}"]`);
+    if (head && c && c.photos + c.albums) head.innerHTML = dayText(key);
+    else head?.remove();
+    $('#empty').hidden = state.total > 0;
+  }
+
   async function remove(it, el) {
     if (!confirm(`${fmtWhen(it.t)} 사진을 지울까요? 되돌릴 수 없고, 방문객의 받기 링크도 열리지 않게 됩니다.`)) return;
     try {
       await api(`/api/manage/shots/${it.id}`, { method: 'DELETE' });
-      el.remove();
-      state.offset = Math.max(0, state.offset - 1);
+      dropRow(it, el);
       sel.delete(it.id);
       syncSel();
       toast('지웠어요.');

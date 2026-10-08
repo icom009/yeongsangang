@@ -114,10 +114,13 @@ def with_orphans():
     return rows
 
 
-def stats():
-    """관리 화면 위쪽 요약: 전체·오늘·장소별."""
+def stats(tz=0):
+    """관리 화면 위쪽 요약: 전체·오늘·장소별. '오늘'은 지난 24시간이 아니라 달력의 오늘
+    (tz는 브라우저의 getTimezoneOffset() 분, 서버 컨테이너는 UTC라서). 목록의 일자별 머리글과 맞춘다."""
     rows = with_orphans()
-    day = time.time() - 86400
+    shift = max(-840, min(840, tz)) * 60
+    now = time.time() - shift
+    day = now - now % 86400 + shift  # 그 시간대의 오늘 0시
     places = {}
     for r in rows:
         key = r.get('place') or '장소 미상'
