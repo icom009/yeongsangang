@@ -44,6 +44,13 @@
     .photo-page .actions { display: grid; gap: 10px; }
     .photo-page .actions .btn { width: 100%; text-decoration: none; }
     .photo-page .tip { margin: 0; color: var(--text-dim); font-size: .9rem; text-align: center; }
+    /* 안드로이드: 웹에서 받은 사진은 카메라 앨범이 아니라 '다운로드' 폴더로 간다. 어디서 찾는지 눈에 띄게 알려 준다 */
+    .saved-guide {
+      margin: 0; padding: 12px 14px; border-radius: 14px; font-size: .9rem; line-height: 1.5; text-align: left;
+      background: rgba(255, 210, 122, .12); border: 1px solid rgba(255, 210, 122, .45); color: var(--text);
+    }
+    .saved-guide[hidden] { display: none; }
+    .saved-guide b { color: var(--sail-hi); }
     .photo-page .ver { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
     .photo-page .ver-label { width: 100%; margin: 4px 0 -2px; color: var(--text-faint); font-size: .8rem; }
     .photo-page .ver button {
@@ -198,6 +205,10 @@
       <button class="btn btn-glass" id="saveShotBtn" type="button">프레임 없는 사진 저장</button>
     </div>
     <p class="tip" id="tip" style="margin-top:14px">저장을 누르면 사진 앱에 바로 담을 수 있어요.</p>
+    <p class="saved-guide" style="margin-top:12px" id="savedGuide" hidden role="status">
+      <b>저장했어요!</b> 갤러리 앱의 <b>앨범 → 다운로드(Download)</b>에 있어요.<br>
+      구글 포토라면 <b>라이브러리 → 기기의 사진 → Download</b>에서 볼 수 있어요.
+    </p>
   </div>
 
   <div class="gen" id="gen" hidden role="dialog" aria-modal="true" aria-labelledby="genTitle">
@@ -308,6 +319,11 @@
       document.body.appendChild(a);
       a.click();
       a.remove();
+      if (ANDROID) {  // 갤러리 첫 화면에는 안 보여서 어디 있는지 알려 준다 (화면 밖이면 보이게 내린다)
+        const g = $('#savedGuide');
+        g.hidden = false;
+        g.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
 
     function prefetch(url, name) {
@@ -644,7 +660,7 @@
 
     $('#saveBtn').addEventListener('click', () => save(versions[cur].final, 'yeongsangang_frame.jpg'));
     $('#saveShotBtn').addEventListener('click', () => save(versions[cur].photo, 'yeongsangang_photo.jpg'));
-    if (ANDROID) tip.textContent = '저장을 누르면 휴대폰에 바로 내려받아져요. 갤러리의 ‘다운로드’ 앨범에서 볼 수 있어요.';
+    if (ANDROID) tip.textContent = '저장을 누르면 휴대폰의 ‘다운로드’ 폴더에 담겨요 (갤러리 → 앨범 → 다운로드).';
     else if (!navigator.canShare) tip.textContent = '저장이 안 되면 사진을 길게 눌러 ‘사진 앱에 저장’을 고르세요.';
     setVersion('base');
     poll();

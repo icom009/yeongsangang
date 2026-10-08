@@ -40,6 +40,13 @@
     .album-page .actions { display: grid; gap: 10px; }
     .album-page .actions .btn { width: 100%; text-decoration: none; }
     .album-page .tip { margin: 0; color: var(--text-dim); font-size: .9rem; text-align: center; }
+    /* 안드로이드: 웹에서 받은 사진은 카메라 앨범이 아니라 '다운로드' 폴더로 간다. 어디서 찾는지 눈에 띄게 알려 준다 */
+    .saved-guide {
+      margin: 0; padding: 12px 14px; border-radius: 14px; font-size: .9rem; line-height: 1.5; text-align: left;
+      background: rgba(255, 210, 122, .12); border: 1px solid rgba(255, 210, 122, .45); color: var(--text);
+    }
+    .saved-guide[hidden] { display: none; }
+    .saved-guide b { color: var(--sail-hi); }
     .album-page .grid {
       list-style: none; margin: 0; padding: 0;
       display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
@@ -72,6 +79,10 @@
       <button class="btn btn-sail btn-lg" id="saveAll" type="button">{{COUNT}}장 모두 저장하기</button>
     </div>
     <p class="tip" id="tip" style="margin:14px 0 6px"></p>
+    <p class="saved-guide" style="margin:6px 0 10px" id="savedGuide" hidden role="status">
+      <b>저장했어요!</b> 모두 갤러리 앱의 <b>앨범 → 다운로드(Download)</b>에 있어요.<br>
+      구글 포토라면 <b>라이브러리 → 기기의 사진 → Download</b>에서 볼 수 있어요.
+    </p>
     <p class="tip" style="margin:0 0 18px">사진을 누르면 한 장씩 크게 보고 저장하거나 AI 효과를 입힐 수 있어요.</p>
     <ul class="grid" id="grid">{{GRID}}</ul>
     <!-- 컴퓨터에서만: 휴대폰은 ZIP을 풀어 사진 앱에 넣기가 어려워 보이지 않는다 -->
@@ -122,7 +133,7 @@
     const startTip = IOS
       ? `‘모두 저장하기’를 누르고 ‘이미지 ${total}개 저장’을 고르면 사진 앱에 한꺼번에 담겨요.`
       : ANDROID
-        ? '‘모두 저장하기’를 누르면 휴대폰에 바로 내려받아져요. 갤러리의 ‘다운로드’ 앨범에서 볼 수 있어요.'
+        ? '‘모두 저장하기’를 누르면 휴대폰의 ‘다운로드’ 폴더에 담겨요 (갤러리 → 앨범 → 다운로드).'
         : '‘모두 저장하기’를 누르면 사진이 차례로 내려받아져요.';
     tip.textContent = startTip + kakaoTip;
     $('#zipTip').hidden = PHONE;
@@ -143,8 +154,12 @@
       }
       btn.disabled = false;
       btn.textContent = label;
-      tip.textContent = (ANDROID ? '갤러리의 ‘다운로드’ 앨범을 확인해 주세요. ' : '')
-        + '빠진 사진이 있으면 그 사진을 눌러 한 장씩 저장해 주세요.' + kakaoTip;
+      tip.textContent = '빠진 사진이 있으면 그 사진을 눌러 한 장씩 저장해 주세요.' + kakaoTip;
+      if (ANDROID) {  // 갤러리 첫 화면에는 안 보여서 어디 있는지 알려 준다 (화면 밖이면 보이게 내린다)
+        const g = $('#savedGuide');
+        g.hidden = false;
+        g.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
 
     async function share() {
