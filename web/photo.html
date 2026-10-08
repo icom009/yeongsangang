@@ -282,7 +282,11 @@
       fx: 'AI가 새로 그린 사진이라 얼굴이 조금 달라질 수 있어요. 기본 사진도 그대로 있어요.',
     };
 
+    // 안드로이드(갤럭시 등) 공유 시트에는 '갤러리에 저장'이 없어 바로 내려받는다 (갤러리 '다운로드' 앨범에 담긴다).
+    // 아이폰은 공유 시트의 '이미지 저장'이 사진 앱에 바로 넣는 가장 확실한 길이다
+    const ANDROID = /Android/i.test(navigator.userAgent);
     const canShareFiles = (f) => {
+      if (ANDROID) return false;
       try { return !!navigator.canShare && navigator.canShare({ files: [f] }); } catch { return false; }
     };
 
@@ -640,7 +644,8 @@
 
     $('#saveBtn').addEventListener('click', () => save(versions[cur].final, 'yeongsangang_frame.jpg'));
     $('#saveShotBtn').addEventListener('click', () => save(versions[cur].photo, 'yeongsangang_photo.jpg'));
-    if (!navigator.canShare) tip.textContent = '저장이 안 되면 사진을 길게 눌러 ‘사진 앱에 저장’을 고르세요.';
+    if (ANDROID) tip.textContent = '저장을 누르면 휴대폰에 바로 내려받아져요. 갤러리의 ‘다운로드’ 앨범에서 볼 수 있어요.';
+    else if (!navigator.canShare) tip.textContent = '저장이 안 되면 사진을 길게 눌러 ‘사진 앱에 저장’을 고르세요.';
     setVersion('base');
     poll();
   }

@@ -70,10 +70,12 @@
   <div id="ready" {{HIDE_READY}}>
     <div class="actions">
       <button class="btn btn-sail btn-lg" id="saveAll" type="button">{{COUNT}}장 모두 저장하기</button>
-      <a class="btn btn-glass" id="zipBtn" href="/p/album/{{AID}}/photos.zip" download>ZIP 파일로 한 번에 받기 (컴퓨터)</a>
     </div>
-    <p class="tip" id="tip" style="margin:14px 0 18px">사진을 누르면 한 장씩 크게 보고 저장하거나 AI 효과를 입힐 수 있어요.</p>
+    <p class="tip" id="tip" style="margin:14px 0 6px"></p>
+    <p class="tip" style="margin:0 0 18px">사진을 누르면 한 장씩 크게 보고 저장하거나 AI 효과를 입힐 수 있어요.</p>
     <ul class="grid" id="grid">{{GRID}}</ul>
+    <!-- 컴퓨터에서만: 휴대폰은 ZIP을 풀어 사진 앱에 넣기가 어려워 보이지 않는다 -->
+    <p class="tip" id="zipTip" style="margin-top:18px" hidden><a href="/p/album/{{AID}}/photos.zip" id="zipBtn" download>ZIP 파일로 한 번에 받기</a></p>
   </div>
   <div class="missing" id="missing" {{HIDE_MISSING}}>
     <p>이 묶음을 찾을 수 없어요. 보관 기간이 지나 사진이 지워졌거나 묶음이 지워졌을 수 있어요.</p>
@@ -99,19 +101,36 @@
 
     const btn = $('#saveAll');
     const tip = $('#tip');
+    // 휴대폰에서 여는 경우가 대부분이다.
+    // 아이폰: 공유 시트의 '이미지 n개 저장'이 사진 앱에 한꺼번에 넣는다.
+    // 안드로이드(갤럭시 등): 공유 시트에 '갤러리에 저장'이 없어 한 장씩 바로 내려받는다(갤러리 '다운로드' 앨범).
+    const ua = navigator.userAgent;
+    const IOS = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    const ANDROID = /Android/i.test(ua);
+    const KAKAO = /KAKAOTALK/i.test(ua);
+    const PHONE = IOS || ANDROID || matchMedia('(pointer: coarse)').matches;
     const total = links.length;
     const label = `${total}장 모두 저장하기`;
     const name = (i) => `yeongsangang_${String(i + 1).padStart(2, '0')}.jpg`;
     let files = null;  // 공유 시트로 넘길 사진들 (한 번 받아 두면 다시 받지 않는다)
 
     const canShareFiles = (list) => {
+      if (ANDROID) return false;
       try { return !!navigator.canShare && navigator.canShare({ files: list }); } catch { return false; }
     };
+    const kakaoTip = KAKAO ? ' 카카오톡 안에서 저장이 안 되면 오른쪽 아래 ⋯ 를 눌러 ‘다른 브라우저로 열기’를 써 주세요.' : '';
+    const startTip = IOS
+      ? `‘모두 저장하기’를 누르고 ‘이미지 ${total}개 저장’을 고르면 사진 앱에 한꺼번에 담겨요.`
+      : ANDROID
+        ? '‘모두 저장하기’를 누르면 휴대폰에 바로 내려받아져요. 갤러리의 ‘다운로드’ 앨범에서 볼 수 있어요.'
+        : '‘모두 저장하기’를 누르면 사진이 차례로 내려받아져요.';
+    tip.textContent = startTip + kakaoTip;
+    $('#zipTip').hidden = PHONE;
 
     // 공유 시트를 못 쓰는 브라우저(컴퓨터 등): 한 장씩 차례로 내려받는다
     async function downloadEach() {
       btn.disabled = true;
-      tip.textContent = '여러 파일 내려받기를 묻는 창이 뜨면 ‘허용’을 눌러 주세요.';
+      tip.textContent = '‘여러 파일 다운로드’를 묻는 창이 뜨면 ‘허용’을 눌러 주세요.';
       for (let i = 0; i < total; i++) {
         btn.textContent = `내려받는 중 ${i + 1} / ${total}`;
         const a = document.createElement('a');
@@ -120,11 +139,12 @@
         document.body.appendChild(a);
         a.click();
         a.remove();
-        await new Promise((r) => setTimeout(r, 700));
+        await new Promise((r) => setTimeout(r, 900));
       }
       btn.disabled = false;
       btn.textContent = label;
-      tip.textContent = '안 받아졌으면 ‘ZIP 파일로 한 번에 받기’나, 사진을 눌러 한 장씩 저장해 주세요.';
+      tip.textContent = (ANDROID ? '갤러리의 ‘다운로드’ 앨범을 확인해 주세요. ' : '')
+        + '빠진 사진이 있으면 그 사진을 눌러 한 장씩 저장해 주세요.' + kakaoTip;
     }
 
     async function share() {

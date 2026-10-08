@@ -378,6 +378,8 @@ def media(sid: str, kind: str, download: int = 0):
             fx = kind.split('_', 1)[-1]
             name = (f'yeongsangang_{fx}_frame.jpg' if kind.startswith('fxf_') else
                     f'yeongsangang_{fx}.jpg' if kind.startswith('fx_') else 'yeongsangang_photo.jpg')
+        # 사진마다 이름이 달라야 단체 묶음을 한꺼번에 받을 때 '(1)', '(2)'가 붙지 않는다 (id는 영문·숫자·-_뿐)
+        name = name.replace('.jpg', f'_{sid[:6]}.jpg')
         headers['Content-Disposition'] = f'attachment; filename="{name}"'
     return FileResponse(p, media_type=JPEG, headers=headers)
 
