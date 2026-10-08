@@ -223,7 +223,7 @@ async def _make(sid, fx, rec, sources):
     try:
         imgs = await asyncio.gather(*[one(p, b) for p, b in zip(sources, bgs)])
         _step(sid, fx, 'finish')
-        await asyncio.to_thread(_save, sid, fx, imgs, rec.get('msg', ''))
+        await asyncio.to_thread(_save, sid, fx, imgs, rec.get('msg', ''), rec.get('font'))
         took = time.time() - t0
         with _lock:
             _jobs.pop((sid, fx), None)
@@ -237,13 +237,13 @@ async def _make(sid, fx, rec, sources):
         print(f'[효과] 실패 {sid} {fx}: {e}', flush=True)
 
 
-def _save(sid, fx, imgs, message):
+def _save(sid, fx, imgs, message, font=None):
     if len(imgs) == 1:
         imgs[0].save(storage.path(sid, f'fx_{fx}'), quality=93, subsampling=0)
-        frame.render(imgs[0], message, storage.path(sid, f'fxf_{fx}'))
+        frame.render(imgs[0], message, storage.path(sid, f'fxf_{fx}'), font)
     else:
         frame.save_grid(imgs, storage.path(sid, f'fx_{fx}'))
-        frame.render(imgs, message, storage.path(sid, f'fxf_{fx}'))
+        frame.render(imgs, message, storage.path(sid, f'fxf_{fx}'), font)
 
 
 _faces = None

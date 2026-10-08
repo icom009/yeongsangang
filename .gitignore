@@ -10,3 +10,4 @@ web/vendor/
 .env.local
 output-laptop/
 .env.laptop
+font/extra/

@@ -1,4 +1,4 @@
-"""합성 모델(RVM)과 실시간 미리보기용 MediaPipe 파일을 내려받는다. Docker 빌드와 처음 설치 때 실행.
+"""합성 모델(RVM), 실시간 미리보기용 MediaPipe 파일, 한마디 글씨체를 내려받는다. Docker 빌드와 처음 설치 때 실행.
 MediaPipe를 로컬에 두면 인터넷이 없는 현장(플랜 B: 공유기만 켠 로컬 운영)에서도 미리보기가 된다."""
 import sys
 import urllib.request
@@ -39,6 +39,23 @@ def fetch_mediapipe():
     return root
 
 
+def fetch_fonts():
+    """한마디 글씨체(Google Fonts, SIL OFL). 받지 못한 글씨체는 고르기에서 빠질 뿐 부스는 그대로 돈다."""
+    for f in config.FONTS:
+        if 'url' not in f or f['file'].exists():
+            continue
+        f['file'].parent.mkdir(parents=True, exist_ok=True)
+        tmp = f['file'].with_name(f['file'].name + '.part')
+        try:
+            urllib.request.urlretrieve(f['url'], tmp)
+            tmp.rename(f['file'])
+            print(f['file'])
+        except Exception as e:  # noqa: BLE001
+            tmp.unlink(missing_ok=True)
+            print(f'글씨체를 받지 못함 ({f["id"]}): {e}')
+
+
 print(ensure_model())
 print(_download(config.FACE_MODEL, config.FACE_URL))  # AI 효과에서 얼굴 수 세기
 print(fetch_mediapipe())
+fetch_fonts()

@@ -7,3 +7,4 @@ model/*.onnx
 certs
 web/vendor
 .env.local
+font/extra

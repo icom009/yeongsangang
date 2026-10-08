@@ -32,6 +32,7 @@ const state = {
   cuts: [],           // 찍은 사진들 {id, shot, plain, person}
   cutIndex: 0,        // 지금 몇 번째 컷인지
   jobs: [],           // 네 컷: 찍자마자 서버로 보낸 합성 작업들 (한 장씩 찍는 동안 뒤에서 돈다)
+  font: '',           // 한마디 글씨체 id (cfg.fonts의 첫 번째가 기본)
 };
 
 let live = null;
@@ -258,6 +259,7 @@ function goHome() {
   state.jobs = [];
   setMode(1);
   $('#msgInput').value = '';
+  if (state.cfg?.fonts?.length) setFont(state.cfg.fonts[0].id);  // 다음 방문객은 기본 글씨체부터
   show('intro');
 }
 
@@ -742,6 +744,73 @@ function layoutCard() {
 
 const measureCtx = document.createElement('canvas').getContext('2d');
 
+/* 한마디 글씨체. 기본(온글잎)은 app.css가 미리 불러 두고, 나머지는 고를 때만 받는다.
+   고른 글씨체에 없는 글자(♥ 등)는 기본 글씨체로 보이는데, 서버(frame._chain)도 같은 순서로 채운다 */
+const BASIC_FAMILY = "'Ownglyph PDH'";
+const fontLoads = new Map();  // id -> 불러오기 약속 (한 번만 받는다)
+
+function isBasicFont(id) {
+  return !id || id === state.cfg.fonts?.[0]?.id;
+}
+
+function fontFamily(id) {
+  return isBasicFont(id) ? BASIC_FAMILY : `'ys-${id}', ${BASIC_FAMILY}`;
+}
+
+function loadFont(id) {
+  const f = (state.cfg.fonts || []).find((x) => x.id === id);
+  if (!f || isBasicFont(id)) return Promise.resolve();
+  if (!fontLoads.has(id)) {
+    const p = new FontFace(`ys-${id}`, `url(${f.url})`).load().then((face) => { document.fonts.add(face); });
+    p.catch(() => fontLoads.delete(id));  // 실패하면 다음에 다시 받는다
+    fontLoads.set(id, p);
+  }
+  return fontLoads.get(id);
+}
+
+function buildFonts() {
+  const list = state.cfg.fonts || [];
+  $('#fontPick').hidden = list.length < 2;
+  $('#fontPicker').replaceChildren(...list.map((f) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'font-opt';
+    b.dataset.id = f.id;
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-label', f.name);
+    b.title = f.name;
+    const name = document.createElement('span');
+    name.style.setProperty('--sample', `url(${f.sample})`);
+    b.append(name);
+    b.addEventListener('click', () => setFont(f.id));
+    return b;
+  }));
+}
+
+function setFont(id) {
+  state.font = id;
+  const fam = fontFamily(id);
+  $('#cardText').style.fontFamily = fam;
+  $('#msgInput').style.fontFamily = fam;
+  document.querySelectorAll('.font-opt').forEach((b) => {
+    b.setAttribute('aria-checked', String(b.dataset.id === id));
+    b.classList.remove('loading');
+  });
+  fitMessage();
+  if (isBasicFont(id)) return;
+  const btn = document.querySelector(`.font-opt[data-id="${id}"]`);
+  btn?.classList.add('loading');
+  loadFont(id).then(() => {
+    btn?.classList.remove('loading');
+    if (state.font === id) fitMessage();  // 글씨체가 들어오면 그 모양으로 다시 맞춘다
+  }).catch(() => {
+    btn?.classList.remove('loading');
+    if (state.font !== id) return;
+    toast('글씨체를 불러오지 못했어요. 기본 글씨체로 쓸게요.');
+    setFont(state.cfg.fonts[0].id);
+  });
+}
+
 function messageLines() {
   const lines = $('#msgInput').value.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 3);
   return lines.length ? lines : [state.cfg.defaultMessage];
@@ -796,7 +865,7 @@ function fitMessage() {
   const bh = ty2 - ty1;
   const paras = messageLines();
   const measureAt = (size) => {
-    measureCtx.font = `${size}px 'Ownglyph PDH'`;
+    measureCtx.font = `${size}px ${fontFamily(state.font)}`;
     return (t) => measureCtx.measureText(t).width;
   };
   let size = 72;
@@ -848,6 +917,7 @@ async function finish() {
         message: $('#msgInput').value,
         filter: state.useFilter,
         cuts: state.cuts.slice(1).map((c) => c.id),  // 네 컷이면 나머지 세 장
+        font: state.font,
       }),
     });
     await loadImage(res.final);
@@ -1054,6 +1124,8 @@ async function init() {
     return;
   }
   buildPlaces();
+  buildFonts();
+  if (state.cfg.fonts?.length) setFont(state.cfg.fonts[0].id);
   // AI 빛 보정은 환경에 따라 켜진다. 외부 서비스를 쓰는 경우에는 처음 화면에 안내를 띄운다
   const ai = state.cfg.ai || {};
   const fx = state.cfg.effects || [];

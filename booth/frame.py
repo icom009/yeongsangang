@@ -10,19 +10,66 @@ from qrcode.image.pil import PilImage
 from . import config
 
 
-@lru_cache(maxsize=1)
-def _font_bytes():
-    for p in (config.FONT, config.FALLBACK_FONT):
-        if p.exists():
-            return p.read_bytes()
-    return None
+def _chain(font_id=None):
+    """글씨체 파일 순서: 고른 글씨체 → 기본 손글씨체 → 나눔고딕. 고른 글씨체에 없는 글자(♥, 드문 글자)는 다음 것으로 쓴다."""
+    out = []
+    for p in (config.font_file(font_id), config.FONT, config.FALLBACK_FONT):
+        if p.exists() and str(p) not in out:
+            out.append(str(p))
+    return out
 
 
-def _font(size):
-    data = _font_bytes()
-    if data is None:
-        return ImageFont.load_default(size)
-    return ImageFont.truetype(io.BytesIO(data), size)
+@lru_cache(maxsize=32)
+def _cmap(path):
+    """그 글씨체에 들어 있는 글자들. fontTools가 없으면 None(모든 글자가 있다고 본다)."""
+    try:
+        from fontTools.ttLib import TTFont
+        return frozenset(TTFont(path, lazy=True).getBestCmap())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _font(size, path=None):
+    if path is None:
+        chain = _chain()
+        if not chain:
+            return ImageFont.load_default(size)
+        path = chain[0]
+    return ImageFont.truetype(path, size)
+
+
+def _runs(text, chain):
+    """글자마다 그 글자가 있는 첫 글씨체로 묶는다 [[글씨체 번호, 글자열], ...].
+    어느 글씨체에도 없는 글자(그림 문자 등)는 빈 네모로 찍히지 않게 뺀다."""
+    runs = []
+    for ch in text:
+        if ch == ' ' and runs:
+            k = runs[-1][0]
+        else:
+            k = next((i for i, p in enumerate(chain) if (cm := _cmap(p)) is None or ord(ch) in cm), None)
+            if k is None:
+                continue
+        if runs and runs[-1][0] == k:
+            runs[-1][1] += ch
+        else:
+            runs.append([k, ch])
+    return runs
+
+
+def _measurer(draw, chain, size):
+    """그 크기에서 글자열 폭을 재는 함수 (글자마다 쓰는 글씨체가 다를 수 있다). .font(k)로 글씨체를 꺼낸다."""
+    fonts = {}
+
+    def font(k):
+        if k not in fonts:
+            fonts[k] = _font(size, chain[k])
+        return fonts[k]
+
+    def measure(text):
+        return sum(draw.textlength(run, font=font(k)) for k, run in _runs(text, chain))
+
+    measure.font = font
+    return measure
 
 
 def clean_message(msg):
@@ -133,8 +180,8 @@ def save_grid(paths, out_path):
     return out_path
 
 
-def render(shots, message, out_path):
-    """shots: 사진 하나(1컷) 또는 네 개(4컷). 파일 경로나 이미 열린 그림."""
+def render(shots, message, out_path, font=None):
+    """shots: 사진 하나(1컷) 또는 네 개(4컷). 파일 경로나 이미 열린 그림. font: 한마디 글씨체 id (없으면 기본)."""
     paths = [shots] if isinstance(shots, (str, Path, Image.Image)) else list(shots)
     frame = Image.open(config.FRAME).convert('RGB')
     boxes = cells(len(paths))
@@ -147,20 +194,42 @@ def render(shots, message, out_path):
     d = ImageDraw.Draw(frame)
 
     # 상자 안에 들어가는 가장 큰 글자 크기를 찾고, 긴 줄은 상자 폭에 맞춰 나눈다
-    def measure_at(size):
-        f = _font(size)
-        return lambda text: d.textlength(text, font=f)
-
-    size, lines = layout_message(clean_message(message), bw, bh, measure_at)
-    font = _font(size)
+    chain = _chain(font)
+    size, lines = layout_message(clean_message(message), bw, bh, lambda sz: _measurer(d, chain, sz))
+    measure = _measurer(d, chain, size)
+    ascent, descent = measure.font(0).getmetrics()
     lh = size * MSG_LINE
     top = by1 + (bh - lh * len(lines)) / 2 + lh / 2
-    for i, x in enumerate(lines):
-        d.text(((bx1 + bx2) / 2, top + i * lh), x, font=font,
-               fill=config.TEXT_COLOR, anchor='mm')
+    for i, line in enumerate(lines):
+        # 줄마다 가운데 정렬. 글씨체가 섞여도 같은 기준선에 (고른 글씨체의 위아래 끝 가운데가 줄 가운데)
+        x = (bx1 + bx2) / 2 - measure(line) / 2
+        y = top + i * lh + (ascent - descent) / 2
+        for k, run in _runs(line, chain):
+            f = measure.font(k)
+            d.text((x, y), run, font=f, fill=config.TEXT_COLOR, anchor='ls')
+            x += d.textlength(run, font=f)
 
     frame.save(out_path, quality=95, subsampling=0)
     return out_path
+
+
+@lru_cache(maxsize=32)
+def font_sample(font_id):
+    """글씨체 고르기 단추의 이름 그림 (흰 글자, 투명 바탕). 화면에서는 모양틀(mask)로 써서 단추 글자색을 입힌다.
+    글씨체 파일을 다 받지 않아도 고르기 단추에서 모양을 볼 수 있다."""
+    f = config.FONT_BY_ID[font_id]
+    W, H = 240, 72
+    img = Image.new('RGBA', (W, H), (255, 255, 255, 0))
+    d = ImageDraw.Draw(img)
+    size = 60
+    font = ImageFont.truetype(str(f['file']), size)
+    while size > 20 and d.textlength(f['name'], font=font) > W - 16:
+        size -= 2
+        font = ImageFont.truetype(str(f['file']), size)
+    d.text((W / 2, H / 2), f['name'], font=font, fill=(255, 255, 255, 255), anchor='mm')
+    buf = io.BytesIO()
+    img.save(buf, 'PNG', optimize=True)
+    return buf.getvalue()
 
 
 def qr_png(url):

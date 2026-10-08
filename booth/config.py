@@ -11,6 +11,38 @@ MODEL_DIR = ROOT / 'model'
 FONT = ROOT / 'font' / 'OwnglyphPDH.ttf'
 FALLBACK_FONT = Path('/usr/share/fonts/truetype/nanum/NanumGothic.ttf')
 
+# 한마디 글씨체. 첫 번째가 기본(저장소에 있는 온글잎 박다현체). 나머지는 scripts/fetch_models.py가 이미지를 만들 때
+# Google Fonts에서 font/extra/로 받는다(모두 SIL OFL 1.1, font/CREDITS.md). 받지 못한 글씨체는 고르기에서 빠진다.
+# 고른 글씨체에 없는 글자(♥, 드문 글자)는 기본 글씨체 → 나눔고딕 순으로 채운다 (frame._chain)
+GOOGLE_FONTS = 'https://github.com/google/fonts/raw/main/ofl/'
+FONTS = [
+    {'id': 'basic', 'name': '또박또박', 'file': FONT},
+    {'id': 'pen', 'name': '볼펜', 'src': 'nanumpenscript/NanumPenScript-Regular.ttf'},
+    {'id': 'brush', 'name': '붓', 'src': 'nanumbrushscript/NanumBrushScript-Regular.ttf'},
+    {'id': 'bold', 'name': '붓펜', 'src': 'eastseadokdo/EastSeaDokdo-Regular.ttf'},
+    {'id': 'calli', 'name': '캘리', 'src': 'yeonsung/YeonSung-Regular.ttf'},
+    {'id': 'cute', 'name': '귀여운', 'src': 'gamjaflower/GamjaFlower-Regular.ttf'},
+    {'id': 'thin', 'name': '가느다란', 'src': 'himelody/HiMelody-Regular.ttf'},
+    {'id': 'crayon', 'name': '크레파스', 'src': 'gaegu/Gaegu-Bold.ttf'},
+    {'id': 'deco', 'name': '꾸밈', 'src': 'singleday/SingleDay-Regular.ttf'},
+]
+for _f in FONTS:
+    if 'src' in _f:
+        _f['file'] = ROOT / 'font' / 'extra' / Path(_f['src']).name
+        _f['url'] = GOOGLE_FONTS + _f['src']
+FONT_BY_ID = {f['id']: f for f in FONTS}
+
+
+def fonts():
+    """실제로 파일이 있는 글씨체만 (받아 두지 못한 글씨체는 고르기에 보이지 않는다)."""
+    return [f for f in FONTS if f['file'].exists()]
+
+
+def font_file(font_id):
+    """고른 글씨체 파일. 모르는 이름이거나 파일이 없으면 기본 글씨체."""
+    f = FONT_BY_ID.get(font_id or '')
+    return f['file'] if f and f['file'].exists() else FONT
+
 OUT_DIR = Path(os.environ.get('YS_OUT_DIR', ROOT / 'output'))
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 

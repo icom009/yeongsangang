@@ -188,6 +188,10 @@ def get_config():
             'color': config.TEXT_COLOR,
         },
         'defaultMessage': config.DEFAULT_MESSAGE,
+        # 한마디 글씨체 (첫 번째가 기본). 파일을 받아 둔 것만
+        'fonts': [{'id': f['id'], 'name': f['name'],
+                   'url': '/font/message.ttf' if f['file'] == config.FONT else f'/font/{f["id"]}.ttf',
+                   'sample': f'/font/{f["id"]}.png'} for f in config.fonts()],
         # 외부로 사진이 나가는 기능(외부 빛 보정 엔진이나 GPT 효과)이 켜져 있으면 처음 화면에 안내가 뜬다
         # 방문객 휴대폰이 사진을 받을 주소 (비상용 노트북 서버는 임시 터널 주소가 잡혀야 QR이 맞다)
         'public': config.public_base_url(),
@@ -219,6 +223,26 @@ def frame_image():
 @app.get('/font/message.ttf')
 def message_font():
     return FileResponse(config.FONT, media_type='font/ttf', headers=LONG_CACHE)
+
+
+def _font_or_404(fid):
+    f = config.FONT_BY_ID.get(fid)
+    if not f or not f['file'].exists():
+        raise HTTPException(404)
+    return f
+
+
+@app.get('/font/{fid}.ttf')
+def message_font_by_id(fid: str):
+    """한마디 글씨체. 한마디 화면에서 고른 글씨체만 받는다 (Caddy가 압축해서 보낸다)."""
+    return FileResponse(_font_or_404(fid)['file'], media_type='font/ttf', headers=LONG_CACHE)
+
+
+@app.get('/font/{fid}.png')
+def message_font_sample(fid: str):
+    """글씨체 고르기 단추에 쓰는 이름 그림."""
+    _font_or_404(fid)
+    return Response(frame.font_sample(fid), media_type='image/png', headers=LONG_CACHE)
 
 
 _client_logs = []
@@ -299,6 +323,7 @@ class FinalBody(BaseModel):
     message: str = Field('', max_length=80)
     filter: bool = True
     cuts: list[str] = Field(default_factory=list)  # 인생네컷이면 나머지 세 장의 id
+    font: str = Field('', max_length=20)  # 한마디 글씨체 id (모르는 값이면 기본)
 
 
 @app.post('/api/shots/{sid}/final')
@@ -307,6 +332,7 @@ async def finalize(sid: str, body: FinalBody, request: Request):
     shot = _need(sid, 'shot')
     done = storage.path(sid, 'final')
     if not done.exists():  # 두 번 눌러도 다시 만들지 않는다
+        font = body.font if body.font in config.FONT_BY_ID else ''
         cut_ids = body.cuts[:3]
         paths = [shot] + [_need(c, 'shot') for c in cut_ids]
         ids = [sid] + cut_ids
@@ -316,7 +342,7 @@ async def finalize(sid: str, body: FinalBody, request: Request):
                 plain = storage.path(i, 'plain')
                 if plain.exists():  # 재시도로 이미 정리된 뒤면 그대로 둔다
                     await asyncio.to_thread(shutil.copyfile, plain, p)
-        await asyncio.to_thread(frame.render, paths if len(paths) > 1 else shot, body.message, done)
+        await asyncio.to_thread(frame.render, paths if len(paths) > 1 else shot, body.message, done, font)
         if len(paths) > 1:
             # 휴대폰에서 AI 효과를 입힐 때 컷마다 따로 쓰도록 낱장을 대표 id 아래에 남긴다
             for i, p in enumerate(paths):
@@ -328,8 +354,8 @@ async def finalize(sid: str, body: FinalBody, request: Request):
             storage.path(i, 'plain').unlink(missing_ok=True)
         for i in ids[1:]:
             storage.path(i, 'shot').unlink(missing_ok=True)
-        ai.note_final(sid, body.message, cut_ids)  # AI 버전도 같은 한마디로 프레임에 담는다
-        records.add(sid, body.message, body.filter, ids)  # 관리 화면 이력 (AI 효과도 이걸 보고 만든다)
+        ai.note_final(sid, body.message, cut_ids, font)  # AI 버전도 같은 한마디·글씨체로 프레임에 담는다
+        records.add(sid, body.message, body.filter, ids, font)  # 관리 화면 이력 (AI 효과도 이걸 보고 만든다)
     return {
         'id': sid,
         'final': f'/media/{sid}/final.jpg',

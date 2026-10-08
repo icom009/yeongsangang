@@ -225,7 +225,7 @@ def status(sid):
     return out
 
 
-def note_final(sid, message, cuts=()):
+def note_final(sid, message, cuts=(), font=''):
     """방문객이 한마디를 적어 완성했을 때. AI 버전도 같은 프레임·같은 한마디로 만들어 둔다.
     4컷이면 cuts에 나머지 세 장의 id가 온다. 네 장이 다 돼야 AI 4컷을 합친다."""
     if _engine is None:
@@ -235,6 +235,7 @@ def note_final(sid, message, cuts=()):
         if rec is None:
             return
         rec['message'] = message
+        rec['font'] = font
         rec['cuts'] = list(cuts)
         for c in cuts:  # 어느 컷이 끝나든 대표 사진을 찾아갈 수 있도록
             member = _states.get(c)
@@ -250,6 +251,7 @@ def _finish_ready(sid):
         lead = rec.get('lead', sid)
         lrec = _states.get(lead) or {}
         message = lrec.get('message')
+        font = lrec.get('font')
         members = [lead] + list(lrec.get('cuts') or [])
         if message is None or lrec.get('framed'):
             return  # 아직 '완성하기' 전이거나 이미 만들었다
@@ -260,15 +262,15 @@ def _finish_ready(sid):
         if not all(s == 'ready' for s in states):
             return
         lrec['framed'] = True
-    _render_group(lead, members, message)
+    _render_group(lead, members, message, font)
 
 
-def _render_group(lead, members, message):
+def _render_group(lead, members, message, font=None):
     paths = [storage.path(m, 'ai') for m in members]
     if not all(p.exists() for p in paths):
         return
     try:
-        frame.render(paths if len(paths) > 1 else paths[0], message, storage.path(lead, 'aifinal'))
+        frame.render(paths if len(paths) > 1 else paths[0], message, storage.path(lead, 'aifinal'), font)
         if len(paths) > 1:
             # 프레임 없는 AI 4컷을 대표 사진 자리에 합쳐 두고, 낱장은 지운다
             frame.save_grid(paths, storage.path(lead, 'ai'))
