@@ -21,6 +21,7 @@
     .sum { color: var(--text-dim); font-size: .9rem; margin: 0 0 14px; }
     .sum b { color: var(--text); }
     .sum .load { color: var(--sail-hi); }
+    .sum .warn { color: #ffb4a8; }
 
     #search {
       width: 100%; padding: 11px 14px; margin-bottom: 14px; border-radius: 12px;
@@ -233,7 +234,9 @@
     // GPT 효과: 오늘 만든 장수와 실제 사용 토큰으로 셈한 금액 (1달러 = 1,400원으로 어림)
     const gpt = s.gpt && s.gpt.on
       ? ` · GPT 오늘 <b>${s.gpt.today}</b>/${s.gpt.limit}장 $${s.gpt.cost.toFixed(2)} (약 ${Math.round(s.gpt.cost * 1400).toLocaleString()}원)`
-      : '';
+      : s.gpt && s.gpt.keyRejected
+        ? ' · <b class="warn">GPT 키가 거절됨: 새 키를 .env에 넣고 부스를 다시 켜 주세요 (그때까지 AI 효과 버튼 숨김)</b>'
+        : '';
     $('#sum').innerHTML = `전체 <b>${s.total}</b>장 · 오늘 <b>${s.today}</b>장`
       + ` · <span class="load">합성 ${s.compose.busy}/${s.compose.slots} · ${ai}</span>${gpt}`;
     $('#sum').hidden = false;

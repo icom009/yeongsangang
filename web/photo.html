@@ -504,14 +504,16 @@
         box.classList.add('fail');
         const limit = kind === 'limit';
         const max = kind === 'max';
+        const off = kind === 'off';  // 서버에서 AI 효과가 꺼짐 (키 문제 등): 다시 눌러도 같다
         $('#genTitle').textContent = limit ? '오늘 준비한 AI 사진이 모두 나갔어요'
-          : max ? '이 사진은 더 만들 수 없어요' : '만들지 못했어요';
+          : max ? '이 사진은 더 만들 수 없어요' : off ? '지금은 AI 효과를 쓸 수 없어요' : '만들지 못했어요';
         $('#genSub').textContent = limit ? '내일 다시 시도해 주세요. 기본 사진은 그대로 저장할 수 있어요.'
           : max ? '다른 효과를 골라 보세요. 기본 사진은 그대로 있어요.'
+            : off ? '기본 사진은 그대로 저장할 수 있어요.'
             : '한 번 더 시도할 수 있어요. 기본 사진은 그대로 있어요.';
         $('#genTime').textContent = '';
         lastSub = '';
-        $('#genRetry').hidden = limit || max;
+        $('#genRetry').hidden = limit || max || off;
         $('#genHide').textContent = '닫기';
       },
       close() {
@@ -594,7 +596,7 @@
           fxState[id] = 'pending';
           if (gen.id === id && gen.state === 'run') gen.update(st);
         } else {
-          fxState[id] = ['limit', 'max'].includes(st.state) ? st.state : 'failed';
+          fxState[id] = ['limit', 'max', 'off'].includes(st.state) ? st.state : 'failed';
           if (gen.id === id && gen.state === 'run') gen.fail(st.state);
         }
       });

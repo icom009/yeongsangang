@@ -66,6 +66,8 @@ async def lifespan(_):
     await asyncio.to_thread(compose.warmup)
     # AI 빛 보정은 있으면 쓰고 없으면 그냥 끈다 (촬영 흐름과 무관하게 뒤에서 돈다)
     tasks = [asyncio.create_task(_cleanup_loop()), *await ai.start(_compose_gate)]
+    # GPT 효과 키가 막혔으면 켤 때 미리 알아 두고 버튼을 숨긴다 (기다리지 않고 뒤에서)
+    tasks.append(asyncio.create_task(asyncio.to_thread(effects.check_key)))
     if config.TUNNEL_METRICS:
         tasks.append(asyncio.create_task(_watch_tunnel()))
     yield
@@ -476,7 +478,7 @@ def manage_status(request: Request):
         'compose': {'slots': config.COMPOSE_SLOTS, 'busy': _busy},
         'ai': ai.queue_info(),
         'keepHours': config.KEEP_HOURS,
-        'gpt': {**effects.usage(), 'on': effects.enabled()},
+        'gpt': {**effects.usage(), 'on': effects.enabled(), 'keyRejected': effects.key_rejected()},
     }
 
 

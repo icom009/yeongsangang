@@ -36,10 +36,43 @@ MAX_TRIES = 2
 _progress = {}        # (sid, 효과 id) -> {'stage', 'drawn', 'done', 'total', 't0'}
 _avg = {}             # 효과 id -> 최근 걸린 시간(초). 예상 시간으로 보여 준다
 DEFAULT_ETA = 32.0    # 실측: 한 장 약 30초 + 마무리
+# OpenAI가 키를 거절(401)하면 부스를 다시 켤 때까지 효과 버튼을 내놓지 않는다. 키가 지워지거나 막히면
+# 방문객이 누를 때마다 실패만 하기 때문 (2026-10-08 실제로 키가 막혀 모든 요청이 401이었다)
+_key_bad = False
 
 
 def enabled():
-    return config.gpt_ready()
+    return config.gpt_ready() and not _key_bad
+
+
+def key_rejected():
+    """키는 넣었는데 OpenAI가 거절한 상태 (관리 화면에 알린다)."""
+    return config.gpt_ready() and _key_bad
+
+
+def _reject_key(where):
+    global _key_bad
+    if not _key_bad:
+        print(f'[효과] OpenAI가 키를 거절했어요(401, {where}). 키가 지워졌거나 막혔습니다. '
+              '.env의 OPENAI_KEY를 새로 발급한 키로 바꾸고 부스를 다시 켜 주세요. 그때까지 AI 효과 버튼을 숨깁니다.',
+              flush=True)
+    _key_bad = True
+
+
+def check_key():
+    """부스를 켤 때 키가 살아 있는지 한 번 본다 (무료인 모델 목록 조회). 인터넷이 없거나 다른 오류면 그냥 넘어간다."""
+    if not config.gpt_ready():
+        return
+    req = urllib.request.Request('https://api.openai.com/v1/models',
+                                 headers={'Authorization': f'Bearer {config.OPENAI_KEY}'})
+    try:
+        with urllib.request.urlopen(req, timeout=15):
+            pass
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            _reject_key('켤 때 확인')
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def catalog():
@@ -115,6 +148,13 @@ def _save_usage():
                                       'cost': round(_day['cost'], 4)}), encoding='utf-8')
     except OSError:
         pass
+
+
+def _refund(n):
+    """보내지도 못하고 끝난 몫(키 거절 등)은 오늘 장수에서 돌려준다."""
+    with _lock:
+        _day['count'] = max(0, _day['count'] - n)
+        _save_usage()
 
 
 def _spend(n):
@@ -231,8 +271,11 @@ async def _make(sid, fx, rec, sources):
             _avg[fx] = took if fx not in _avg else _avg[fx] * 0.7 + took * 0.3
         print(f'[효과] 완료 {sid} {fx} ({len(imgs)}장, {took:.1f}초)', flush=True)
     except Exception as e:  # 실패해도 방문객은 원본을 그대로 받는다
+        if _key_bad:
+            _refund(len(sources))  # 키가 거절돼 그리지도 못했으니 오늘 장수에 넣지 않는다
         with _lock:
-            _jobs[(sid, fx)] = 'failed'
+            # 키가 거절됐으면 '다시 시도'를 보여 주지 않는다 (다시 눌러도 같다)
+            _jobs[(sid, fx)] = 'off' if _key_bad else 'failed'
             _progress.pop((sid, fx), None)
         print(f'[효과] 실패 {sid} {fx}: {e}', flush=True)
 
@@ -337,6 +380,8 @@ def _edit(path, prompt):
                 print(f'[효과] HTTP {e.code}, {wait:.0f}초 뒤 다시 보냄', flush=True)
                 time.sleep(min(wait, 30))
                 continue
+            if e.code == 401:
+                _reject_key('사진 만들기')
             # 키·요금·내용 검사 같은 이유가 로그에 남도록
             raise RuntimeError(f'HTTP {e.code} {e.read()[:300]!r}') from None
     u = res.get('usage') or {}
