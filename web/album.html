@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1d22">
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛵</text></svg>">
+  <title>영산강 축제 AI 체험부스 단체 사진</title>
+  <meta name="description" content="2026 나주영산강축제 AI 체험부스에서 함께 찍은 사진이에요. 한 번에 모두 저장하세요.">
+  <!-- 카카오톡·문자·메신저에 주소를 붙여 넣으면 나오는 미리보기 -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="2026 나주영산강축제">
+  <meta property="og:title" content="영산강 축제 AI 체험부스 단체 사진">
+  <meta property="og:description" content="함께 찍은 사진 {{COUNT}}장을 한 번에 저장하세요.">
+  <meta property="og:url" content="{{BASE}}/p/album/{{AID}}">
+  <meta property="og:image" content="{{BASE}}/static/og.jpg?v=1">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:locale" content="ko_KR">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hahmlet:wght@700&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+  <style>
+    .album-page {
+      position: relative;
+      max-width: 620px; margin: 0 auto;
+      padding: 28px 16px calc(36px + env(safe-area-inset-bottom));
+      display: flex; flex-direction: column; gap: 18px;
+    }
+    .album-page header p { margin: 0 0 4px; color: var(--sail-hi); font-weight: 600; font-size: .95rem; }
+    .album-page h1 {
+      margin: 0; font-family: var(--display); font-weight: 700;
+      font-size: 1.85rem; letter-spacing: -.03em; line-height: 1.25; overflow-wrap: anywhere;
+    }
+    .album-page .count { margin: 6px 0 0; color: var(--text-dim); }
+    .album-page .actions { display: grid; gap: 10px; }
+    .album-page .actions .btn { width: 100%; text-decoration: none; }
+    .album-page .tip { margin: 0; color: var(--text-dim); font-size: .9rem; text-align: center; }
+    .album-page .grid {
+      list-style: none; margin: 0; padding: 0;
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+    }
+    .album-page .grid a { display: block; position: relative; border-radius: 10px; overflow: hidden; }
+    .album-page .grid img {
+      display: block; width: 100%; aspect-ratio: 2 / 3; object-fit: cover; background: rgba(255, 255, 255, .06);
+      box-shadow: 0 18px 34px -16px rgba(0, 0, 0, .7);
+    }
+    .album-page .grid a::after {
+      content: attr(data-n); position: absolute; left: 8px; top: 8px;
+      min-width: 24px; height: 24px; padding: 0 7px; border-radius: 999px; display: grid; place-items: center;
+      background: rgba(6, 18, 22, .7); color: #fff; font-size: .78rem; font-weight: 700;
+    }
+    @media (min-width: 560px) { .album-page .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    .album-page .missing { padding: 40px 0; }
+    .album-page .missing p { color: var(--text-dim); }
+  </style>
+</head>
+<body>
+<div class="ambient" id="ambient" aria-hidden="true"><img alt=""></div>
+<main class="album-page" data-aid="{{AID}}">
+  <header>
+    <p>2026 나주영산강축제</p>
+    <h1>{{TITLE}}</h1>
+    <p class="count" {{HIDE_READY}}>함께 찍은 사진 {{COUNT}}장</p>
+  </header>
+  <div id="ready" {{HIDE_READY}}>
+    <div class="actions">
+      <button class="btn btn-sail btn-lg" id="saveAll" type="button">{{COUNT}}장 모두 저장하기</button>
+      <a class="btn btn-glass" id="zipBtn" href="/p/album/{{AID}}/photos.zip" download>ZIP 파일로 한 번에 받기 (컴퓨터)</a>
+    </div>
+    <p class="tip" id="tip" style="margin:14px 0 18px">사진을 누르면 한 장씩 크게 보고 저장하거나 AI 효과를 입힐 수 있어요.</p>
+    <ul class="grid" id="grid">{{GRID}}</ul>
+  </div>
+  <div class="missing" id="missing" {{HIDE_MISSING}}>
+    <p>이 묶음을 찾을 수 없어요. 보관 기간이 지나 사진이 지워졌거나 묶음이 지워졌을 수 있어요.</p>
+  </div>
+</main>
+<script>
+  // 휴대폰에서 난 오류를 서버 로그로 (어떤 브라우저에서 멈췄는지 보려고)
+  (function () {
+    function send(msg) {
+      try { navigator.sendBeacon('/p/log', JSON.stringify({ page: 'album', msg: String(msg).slice(0, 500), ua: navigator.userAgent })); } catch (e) { /* 무시 */ }
+    }
+    window.addEventListener('error', function (e) { send((e.message || 'error') + ' @' + e.lineno); });
+    window.addEventListener('unhandledrejection', function (e) { send('rejection ' + (e.reason && e.reason.message || e.reason)); });
+  })();
+</script>
+<script>
+  (() => {
+    const $ = (s) => document.querySelector(s);
+    const links = [...document.querySelectorAll('#grid a')];
+    if (!links.length) return;
+    links.forEach((a, i) => { a.dataset.n = String(i + 1); });
+    $('#ambient img').src = links[0].querySelector('img').src;  // 첫 사진의 빛이 화면 전체에 번지게
+
+    const btn = $('#saveAll');
+    const tip = $('#tip');
+    const total = links.length;
+    const label = `${total}장 모두 저장하기`;
+    const name = (i) => `yeongsangang_${String(i + 1).padStart(2, '0')}.jpg`;
+    let files = null;  // 공유 시트로 넘길 사진들 (한 번 받아 두면 다시 받지 않는다)
+
+    const canShareFiles = (list) => {
+      try { return !!navigator.canShare && navigator.canShare({ files: list }); } catch { return false; }
+    };
+
+    // 공유 시트를 못 쓰는 브라우저(컴퓨터 등): 한 장씩 차례로 내려받는다
+    async function downloadEach() {
+      btn.disabled = true;
+      tip.textContent = '여러 파일 내려받기를 묻는 창이 뜨면 ‘허용’을 눌러 주세요.';
+      for (let i = 0; i < total; i++) {
+        btn.textContent = `내려받는 중 ${i + 1} / ${total}`;
+        const a = document.createElement('a');
+        a.href = `/media/${links[i].dataset.sid}/final.jpg?download=1`;
+        a.download = name(i);
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        await new Promise((r) => setTimeout(r, 700));
+      }
+      btn.disabled = false;
+      btn.textContent = label;
+      tip.textContent = '안 받아졌으면 ‘ZIP 파일로 한 번에 받기’나, 사진을 눌러 한 장씩 저장해 주세요.';
+    }
+
+    async function share() {
+      try {
+        await navigator.share({ files, title: '영산강 포토부스 사진' });
+        btn.textContent = label;
+        return true;
+      } catch (e) {
+        if (e && e.name === 'AbortError') { btn.textContent = label; return true; }  // 사용자가 닫음
+        if (e && e.name === 'NotAllowedError') return false;  // 받는 동안 '누른 직후'가 지나 버림: 한 번 더 누르게
+        downloadEach();
+        return true;
+      }
+    }
+
+    btn.addEventListener('click', async () => {
+      if (files) { await share(); return; }
+      const probe = [new File([new Blob(['x'])], 'x.jpg', { type: 'image/jpeg' })];
+      if (!canShareFiles(probe)) { downloadEach(); return; }
+      // 휴대폰: 사진을 모두 받아 둔 뒤 공유 시트에서 '이미지 저장'으로 한꺼번에
+      btn.disabled = true;
+      let done = 0;
+      btn.textContent = `사진 담는 중 0 / ${total}`;
+      try {
+        const list = new Array(total);
+        let next = 0;
+        const worker = async () => {
+          while (next < total) {
+            const i = next++;
+            const blob = await (await fetch(`/media/${links[i].dataset.sid}/final.jpg`)).blob();
+            list[i] = new File([blob], name(i), { type: 'image/jpeg' });
+            done += 1;
+            btn.textContent = `사진 담는 중 ${done} / ${total}`;
+          }
+        };
+        await Promise.all([worker(), worker(), worker()]);
+        if (!canShareFiles(list)) { btn.disabled = false; downloadEach(); return; }
+        files = list;
+      } catch {
+        btn.disabled = false;
+        btn.textContent = label;
+        tip.textContent = '사진을 받지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.';
+        return;
+      }
+      btn.disabled = false;
+      if (!(await share())) {
+        btn.textContent = `준비됐어요 · 눌러서 ${total}장 저장`;
+        tip.textContent = '한 번 더 누르면 ‘이미지 저장’을 고를 수 있어요.';
+      }
+    });
+  })();
+</script>
+</body>
+</html>

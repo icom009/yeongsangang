@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from booth import ai, compose, config, effects, frame, records, storage
+from booth import ai, albums, compose, config, effects, frame, records, storage
 
 # 실시간 미리보기 모듈(.mjs)·wasm을 브라우저가 받아들이도록 형식을 명시 (OS마다 기본값이 다르다)
 mimetypes.add_type('text/javascript', '.mjs')
@@ -57,6 +57,7 @@ async def _watch_tunnel():
 async def _cleanup_loop():
     while True:
         await asyncio.to_thread(storage.cleanup)
+        await asyncio.to_thread(albums.prune)  # 사진이 다 지워진 단체 묶음도 정리
         await asyncio.sleep(3600)
 
 
@@ -523,6 +524,83 @@ def photo_ai(sid: str):
         raise HTTPException(404)
     return JSONResponse({**ai.status(sid), 'effects': effects.status(sid), 'catalog': effects.catalog()},
                         headers=NO_STORE)
+
+
+# ---------- 단체 묶음 ----------
+# 단체로 와서 한 명씩 찍은 사진을 관리 화면에서 골라 QR 하나로 모두 받게 한다 (booth/albums.py)
+class AlbumBody(BaseModel):
+    ids: list[str] = Field(default_factory=list, max_length=200)
+    title: str = Field('', max_length=60)
+
+
+def _album_out(aid, t, title, count, request):
+    return {'id': aid, 't': t, 'title': title, 'count': count,
+            'page': f'{base_url(request)}/p/album/{aid}', 'qr': f'/api/manage/albums/{aid}/qr.png'}
+
+
+@app.post('/api/manage/albums')
+async def manage_album_create(body: AlbumBody, request: Request):
+    _need_manage(request)
+    try:
+        aid, rec = await asyncio.to_thread(albums.create, body.ids, body.title)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    print(f'[묶음] {aid} {len(rec["ids"])}장 {rec["title"]}', flush=True)
+    return _album_out(aid, rec['t'], rec['title'], len(rec['ids']), request)
+
+
+@app.get('/api/manage/albums')
+def manage_album_list(request: Request):
+    _need_manage(request)
+    return {'items': [_album_out(r['id'], r['t'], r['title'], r['count'], request) for r in albums.listing()]}
+
+
+@app.delete('/api/manage/albums/{aid}')
+def manage_album_delete(aid: str, request: Request):
+    """묶음만 지운다 (사진은 그대로). 이미 나간 묶음 QR은 열리지 않게 된다."""
+    _need_manage(request)
+    if not albums.remove(aid):
+        raise HTTPException(404, '묶음을 찾을 수 없어요.')
+    return {'ok': True}
+
+
+@app.get('/api/manage/albums/{aid}/qr.png')
+def manage_album_qr(aid: str, request: Request):
+    _need_manage(request)
+    if not albums.get(aid):
+        raise HTTPException(404)
+    return Response(frame.qr_png(f'{base_url(request)}/p/album/{aid}'), media_type='image/png')
+
+
+def _album_photos(aid):
+    rec = albums.get(aid)
+    return (rec, albums.alive(rec['ids'])) if rec else (None, [])
+
+
+@app.get('/p/album/{aid}', response_class=HTMLResponse)
+def album_page(aid: str, request: Request):
+    """단체 묶음 받기 화면 (공개). 스크립트가 안 도는 브라우저에서도 사진이 보이도록 목록은 서버가 넣는다."""
+    rec, ids = _album_photos(aid)
+    grid = ''.join(
+        f'<li><a href="/p/{i}" data-sid="{i}"><img src="/media/{i}/final.jpg" alt="{n}번째 사진" loading="lazy"></a></li>'
+        for n, i in enumerate(ids, 1))
+    title = (rec or {}).get('title') or '함께 찍은 사진'
+    page = (config.WEB_DIR / 'album.html').read_text(encoding='utf-8')
+    for k, v in {'{{BASE}}': base_url(request), '{{AID}}': html.escape(aid if ids else ''),
+                 '{{TITLE}}': html.escape(title), '{{COUNT}}': str(len(ids)), '{{GRID}}': grid,
+                 '{{HIDE_READY}}': '' if ids else 'hidden', '{{HIDE_MISSING}}': 'hidden' if ids else ''}.items():
+        page = page.replace(k, v)
+    return HTMLResponse(page, status_code=200 if ids else 404, headers=NO_STORE)
+
+
+@app.get('/p/album/{aid}/photos.zip')
+async def album_zip(aid: str):
+    """묶음 사진을 한 번에 (주로 컴퓨터에서). 묶음마다 한 번 만들어 두고 다시 쓴다."""
+    _, ids = _album_photos(aid)
+    if not ids:
+        raise HTTPException(404, '사진을 찾을 수 없어요.')
+    path = await asyncio.to_thread(albums.zip_path, aid, ids)
+    return FileResponse(path, media_type='application/zip', filename='yeongsangang_photos.zip', headers=NO_STORE)
 
 
 @app.post('/p/{sid}/fx/{fx}')
