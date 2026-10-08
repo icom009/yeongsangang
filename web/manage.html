@@ -23,11 +23,20 @@
     .sum .load { color: var(--sail-hi); }
     .sum .warn { color: #ffb4a8; }
 
-    #search {
-      width: 100%; padding: 11px 14px; margin-bottom: 14px; border-radius: 12px;
-      background: var(--glass); border: 1px solid var(--glass-line);
-      color: var(--text); font: inherit; font-size: .95rem;
+    /* 날짜 탭: 최근 날짜가 맨 왼쪽. 내려도 위에 붙어 있다 */
+    .tabs {
+      position: sticky; top: 0; z-index: 6; display: flex; gap: 6px; overflow-x: auto;
+      margin: 0 calc(-1 * var(--gutter)) 12px; padding: 8px var(--gutter);
+      background: var(--night); border-bottom: 1px solid var(--glass-line); scrollbar-width: thin;
     }
+    .tab {
+      flex: none; display: grid; gap: 2px; justify-items: start; padding: 8px 14px; border-radius: 12px;
+      background: var(--glass); border: 1px solid var(--glass-line); color: var(--text-dim);
+      font: inherit; font-size: .92rem; font-weight: 600; cursor: pointer; text-align: left;
+    }
+    .tab small { font-size: .76rem; font-weight: 400; color: var(--text-faint); }
+    .tab[aria-selected='true'] { background: var(--sail); border-color: var(--sail); color: var(--on-sail); }
+    .tab[aria-selected='true'] small { color: var(--on-sail); opacity: .8; }
 
     .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
     .row {
@@ -57,14 +66,6 @@
 
     .more { display: grid; place-items: center; margin-top: 18px; }
 
-    /* 일자별 머리글: 내려도 지금 보는 날짜가 위에 붙어 있게 (뒤 머리글이 앞 머리글을 덮는다) */
-    .list .day {
-      position: sticky; top: 0; z-index: 5; margin-top: 12px; padding: 10px 4px 8px;
-      background: var(--night); border-bottom: 1px solid var(--glass-line);
-      font-weight: 700; font-size: .98rem;
-    }
-    .list .day:first-child { margin-top: 0; }
-    .list .day small { margin-left: 8px; font-weight: 400; font-size: .8rem; color: var(--text-faint); }
     .row .nopick { width: 20px; flex: none; }
     .row.album { background: rgba(255, 210, 122, .05); border-style: dashed; }
     .row .tag.group { color: var(--sail-hi); border-color: rgba(255, 210, 122, .4); }
@@ -123,7 +124,7 @@
   </div>
 
   <p class="sum" id="sum" hidden></p>
-  <input type="search" id="search" placeholder="한마디·장소·묶음 이름·ID로 찾기" autocomplete="off" hidden>
+  <nav class="tabs" id="tabs" role="tablist" aria-label="날짜" hidden></nav>
 
   <p class="hint" id="pickHint" hidden>단체로 한 명씩 찍었다면 왼쪽 네모를 골라 QR 하나로 묶을 수 있어요. Shift를 누른 채 고르면 그 사이를 한꺼번에 골라요. 만든 묶음은 만든 시각에 맞춰 목록에 함께 보여요.</p>
 
@@ -178,7 +179,7 @@
 <script>
   const $ = (s) => document.querySelector(s);
   const PAGE = 30;
-  const state = { offset: 0, total: 0, q: '', days: {}, lastDay: '' };
+  const state = { day: '', days: [], offset: 0, total: 0, seq: 0 };  // day: 보고 있는 날짜 탭 (비우면 가장 최근)
   let cur = null;
 
   function toast(msg) {
@@ -263,7 +264,8 @@
   $('#lockBtn').addEventListener('click', async () => {
     await fetch('/api/manage/logout', { method: 'POST' });
     $('#list').innerHTML = '';
-    $('#sum').hidden = $('#search').hidden = $('#pickHint').hidden = true;
+    $('#sum').hidden = $('#tabs').hidden = $('#pickHint').hidden = true;
+    state.day = '';
     sel.clear();
     syncSel();
     openLogin();
@@ -303,7 +305,6 @@
     $('#sum').innerHTML = `전체 <b>${s.total}</b>장 · 오늘 <b>${s.today}</b>장`
       + ` · <span class="load">합성 ${s.compose.busy}/${s.compose.slots} · ${ai}</span>${gpt}`;
     $('#sum').hidden = false;
-    $('#search').hidden = false;
     $('#pickHint').hidden = false;
   }
 
@@ -336,50 +337,52 @@
     return el;
   }
 
-  /* ---------- 일자별 머리글 ---------- */
-  // 장수는 서버가 날짜별로 센 값 (아직 안 불러온 쪽까지 포함). 날짜는 이 브라우저의 시간대로 나눈다
-  function dayText(key) {
-    const [y, m, d] = key.split('-').map(Number);
-    const c = state.days[key] || { photos: 0, albums: 0 };
-    const today = key === dayKey(Date.now() / 1000) ? '오늘 · ' : '';
-    return `${today}${m}월 ${d}일 (${WEEK[new Date(y, m - 1, d).getDay()]})`
-      + `<small>${[c.photos && `사진 ${c.photos}장`, c.albums && `단체 묶음 ${c.albums}개`].filter(Boolean).join(' · ')}</small>`;
+  /* ---------- 날짜 탭 ---------- */
+  // 체험 부스라 방금 찍은 사진이 가장 중요하다. 날짜별 탭으로 나누고, 처음엔 가장 최근 날짜를 연다
+  function renderTabs() {
+    const tabs = $('#tabs');
+    const x = tabs.scrollLeft;
+    const today = dayKey(Date.now() / 1000);
+    tabs.replaceChildren(...state.days.map((d) => {
+      const [y, m, dd] = d.day.split('-').map(Number);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tab';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(d.day === state.day));
+      b.innerHTML = `<span>${d.day === today ? '오늘 · ' : ''}${m}월 ${dd}일 (${WEEK[new Date(y, m - 1, dd).getDay()]})</span>`
+        + `<small>${[d.photos && `사진 ${d.photos}장`, d.albums && `묶음 ${d.albums}개`].filter(Boolean).join(' · ')}</small>`;
+      b.addEventListener('click', () => {
+        if (d.day === state.day) return;
+        state.day = d.day;
+        renderTabs();
+        loadPage(true).then(() => scrollTo(0, 0)).catch(() => {});
+      });
+      return b;
+    }));
+    tabs.scrollLeft = x;
+    tabs.hidden = !state.days.length;
   }
 
-  function dayHead(key) {
-    const li = document.createElement('li');
-    li.className = 'day';
-    li.dataset.day = key;
-    li.innerHTML = dayText(key);
-    return li;
-  }
-
-  // 사진과 단체 묶음이 한 목록에 최신 순으로 온다. 날짜가 바뀌는 곳마다 머리글을 넣는다
+  // 고른 날짜의 사진과 단체 묶음을 최신 순으로
   async function loadPage(reset) {
-    if (reset) {
-      state.offset = 0;
-      state.lastDay = '';
-    }
-    const res = await api(`/api/manage/shots?offset=${state.offset}&limit=${PAGE}`
-      + `&q=${encodeURIComponent(state.q)}&tz=${new Date().getTimezoneOffset()}`);
-    state.total = res.total;
+    if (reset) state.offset = 0;
+    const seq = ++state.seq;  // 탭을 빠르게 바꾸면 늦게 온 앞 응답은 버린다
+    const res = await api(`/api/manage/shots?day=${state.day}&offset=${state.offset}&limit=${PAGE}`
+      + `&tz=${new Date().getTimezoneOffset()}`);
+    if (seq !== state.seq) return;
+    state.day = res.day;
     state.days = res.days;
+    state.total = res.total;
+    renderTabs();
     // 열어 둔 사이 새 사진이 완성되면 쪽 경계가 밀려 이미 있는 줄이 다시 올 수 있다 → 걸러 낸다
     const have = new Set(reset ? [] : [...document.querySelectorAll('#list .row')].map((r) => r.dataset.id));
-    const out = [];
-    for (const it of res.items) {
-      if (have.has(it.id)) continue;
-      const key = dayKey(it.t);
-      if (key !== state.lastDay) out.push(dayHead(key));
-      state.lastDay = key;
-      out.push(row(it));
-    }
-    if (reset) $('#list').replaceChildren(...out);
-    else $('#list').append(...out);
-    document.querySelectorAll('#list .day').forEach((h) => { h.innerHTML = dayText(h.dataset.day); });
-    syncSel();  // 찾기·더 보기 뒤에도 고른 표시가 남게
+    const rows = res.items.filter((it) => !have.has(it.id)).map(row);
+    if (reset) $('#list').replaceChildren(...rows);
+    else $('#list').append(...rows);
+    syncSel();  // 탭을 바꾸거나 더 보기 뒤에도 고른 표시가 남게
     state.offset += res.items.length;
-    $('#empty').hidden = state.total > 0;
+    $('#empty').hidden = state.days.length > 0;
     $('#moreBtn').hidden = state.offset >= state.total;
   }
 
@@ -497,7 +500,8 @@
       lastPick = null;
       syncSel();
       openAlbumQr(a);
-      loadPage(true).then(() => scrollTo(0, 0)).catch(() => {});  // 새 묶음이 맨 위(오늘)에 보이게
+      state.day = '';  // 새 묶음은 가장 최근 날짜 탭 맨 위에 있다
+      loadPage(true).then(() => scrollTo(0, 0)).catch(() => {});
     } catch (err) {
       if (err.message !== '401') $('#albumErr').textContent = err.message;
     } finally {
@@ -506,19 +510,16 @@
   });
 
   /* ---------- 삭제 ---------- */
-  // 줄을 빼고 그 날 머리글의 장수를 고친다. 그 날 남은 것이 없으면 머리글도 뺀다
+  // 줄을 빼고 날짜 탭의 장수를 고친다. 그 날짜가 비면 탭을 빼고 가장 최근 날짜로
   function dropRow(it, el) {
     el.remove();
     state.offset = Math.max(0, state.offset - 1);  // 다음 쪽 시작점도 당긴다 (안 그러면 경계의 한 장을 건너뛴다)
     state.total = Math.max(0, state.total - 1);
-    const key = dayKey(it.t);
-    const c = state.days[key];
+    const d = state.days.find((x) => x.day === state.day);
     const kind = it.kind === 'album' ? 'albums' : 'photos';
-    if (c) c[kind] = Math.max(0, c[kind] - 1);
-    const head = document.querySelector(`#list .day[data-day="${key}"]`);
-    if (head && c && c.photos + c.albums) head.innerHTML = dayText(key);
-    else head?.remove();
-    $('#empty').hidden = state.total > 0;
+    if (d) d[kind] = Math.max(0, d[kind] - 1);
+    if (d && !(d.photos + d.albums)) loadPage(true).catch(() => {});
+    else renderTabs();
   }
 
   async function remove(it, el) {
@@ -538,11 +539,6 @@
   /* ---------- 연결 ---------- */
   $('#refreshBtn').addEventListener('click', reload);
   $('#moreBtn').addEventListener('click', () => loadPage(false).catch(() => {}));
-  let findTimer = 0;
-  $('#search').addEventListener('input', () => {
-    clearTimeout(findTimer);
-    findTimer = setTimeout(() => { state.q = $('#search').value; loadPage(true).catch(() => {}); }, 350);
-  });
   // 다른 화면으로 넘어가면 사진을 다시 가린다
   addEventListener('blur', hideAll);
   document.addEventListener('visibilitychange', () => { if (document.hidden) hideAll(); });

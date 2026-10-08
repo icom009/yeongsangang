@@ -486,24 +486,23 @@ def manage_status(request: Request, tz: int = 0):
 
 
 @app.get('/api/manage/shots')
-def manage_shots(request: Request, offset: int = 0, limit: int = 40, q: str = '', tz: int = 0):
-    """관리 화면 목록: 사진과 단체 묶음을 한 목록에 최신 순으로. tz는 브라우저의 getTimezoneOffset() (분)
-    이고, 일자별 머리글에 쓸 날짜별 장수를 그 시간대로 센다 (서버 컨테이너는 UTC라서)."""
+def manage_shots(request: Request, day: str = '', offset: int = 0, limit: int = 40, tz: int = 0):
+    """관리 화면 목록: 날짜 탭 하나의 사진과 단체 묶음을 한 목록에 최신 순으로, 날짜 탭(최신 날짜부터, 장수 포함)과 함께.
+    day를 비우거나 없는 날짜면 가장 최근 날짜. tz는 브라우저의 getTimezoneOffset() (분)이고 날짜를 그 시간대로
+    나눈다 (서버 컨테이너는 UTC라서)."""
     _need_manage(request)
-    rows = records.with_orphans()
-    groups = albums.listing()
-    key = q.strip()
-    if key:
-        rows = [r for r in rows
-                if key in r.get('msg', '') or key in r.get('place', '') or key == r.get('id')]
-        groups = [a for a in groups if key in a['title'] or key == a['id']]
     # 같은 초면 묶음이 위로 (사진을 다 찍은 뒤에 만드니까). sorted는 안정 정렬이라 앞에 둔 묶음이 먼저 온다
-    rows = sorted([{**a, 'kind': 'album'} for a in groups] + rows, key=lambda r: r.get('t', 0), reverse=True)
+    rows = sorted([{**a, 'kind': 'album'} for a in albums.listing()] + records.with_orphans(),
+                  key=lambda r: r.get('t', 0), reverse=True)
     shift = max(-840, min(840, tz)) * 60
-    days = {}
+    days = {}  # 최신 순으로 쌓이므로 최근 날짜가 먼저
     for r in rows:
-        d = days.setdefault(time.strftime('%Y-%m-%d', time.gmtime(r.get('t', 0) - shift)), {'photos': 0, 'albums': 0})
+        r['day'] = time.strftime('%Y-%m-%d', time.gmtime(r.get('t', 0) - shift))
+        d = days.setdefault(r['day'], {'day': r['day'], 'photos': 0, 'albums': 0})
         d['albums' if r.get('kind') == 'album' else 'photos'] += 1
+    if day not in days:
+        day = next(iter(days), '')
+    rows = [r for r in rows if r['day'] == day]
     offset = max(0, offset)
     items = []
     for r in rows[offset:offset + min(100, max(1, limit))]:
@@ -521,7 +520,7 @@ def manage_shots(request: Request, offset: int = 0, limit: int = 40, q: str = ''
                       'shot': f'/media/{sid}/shot.jpg',
                       'qr': f'/api/shots/{sid}/qr.png',
                       'page': f'{base_url(request)}/p/{sid}'})
-    return {'total': len(rows), 'offset': offset, 'items': items, 'days': days}
+    return {'day': day, 'days': list(days.values()), 'total': len(rows), 'offset': offset, 'items': items}
 
 
 @app.delete('/api/manage/shots/{sid}')
