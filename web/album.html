@@ -77,7 +77,9 @@
   <div id="ready" {{HIDE_READY}}>
     <div class="actions">
       <button class="btn btn-sail btn-lg" id="saveAll" type="button">{{COUNT}}장 모두 저장하기</button>
+      <button class="btn btn-glass" id="saveGallery" type="button" hidden>📁 갤러리에 {{COUNT}}장 바로 저장 (사진 폴더)</button>
     </div>
+    <p class="tip" style="margin-top:10px" id="galleryHow" hidden>‘갤러리에 바로 저장’을 누르면 폴더 고르기 화면이 떠요. <b>Pictures</b> 폴더를 고르고 ‘이 폴더 사용’ → ‘허용’을 누르면 갤러리 첫 화면에 바로 들어가요.</p>
     <p class="tip" id="tip" style="margin:14px 0 6px"></p>
     <p class="saved-guide" style="margin:6px 0 10px" id="savedGuide" hidden role="status">
       <b>저장했어요!</b> 모두 갤러리 앱의 <b>앨범 → 다운로드(Download)</b>에 있어요.<br>
@@ -173,6 +175,77 @@
         downloadEach();
         return true;
       }
+    }
+
+    // ---------- 갤러리(고른 폴더)에 바로 저장: Android 크롬 132+ ----------
+    // 웹에서 내려받은 사진은 '다운로드' 폴더로만 가서 갤러리 첫 화면에 안 보인다. 크롬은 방문객이 고른 폴더
+    // (Pictures 등)에 직접 쓸 수 있어서, 그 폴더에 넣으면 갤러리 첫 화면(사진)에 바로 보인다.
+    // 삼성 인터넷·앱 안 브라우저(카카오톡 등)는 이 기능이 없거나 막혀 있어 단추를 숨긴다
+    const FOLDER_OK = ANDROID && typeof window.showDirectoryPicker === 'function'
+      && !/; wv\)|KAKAOTALK|NAVER|SamsungBrowser/i.test(navigator.userAgent);
+
+    function folderLog(msg) {  // 실기기에서만 확인할 수 있어서 실패하면 서버 로그로 알린다
+      try { navigator.sendBeacon('/p/log', JSON.stringify({ kind: 'folder-save', msg: String(msg).slice(0, 300), ua: navigator.userAgent })); } catch { /* 무시 */ }
+    }
+
+    // items: [{url, name}]. 폴더를 한 번 고르면 모두 그 폴더에 쓴다. progress(i, n)
+    async function saveToFolder(items, progress) {
+      const dir = await window.showDirectoryPicker({ id: 'ys-photos', mode: 'readwrite', startIn: 'pictures' });
+      for (let i = 0; i < items.length; i++) {
+        progress?.(i, items.length);
+        const blob = await (await fetch(items[i].url)).blob();
+        const fh = await dir.getFileHandle(items[i].name, { create: true });
+        const w = await fh.createWritable();
+        await w.write(blob);
+        await w.close();
+      }
+      return dir.name;
+    }
+
+    // 저장 결과를 안내 상자에 (폴더 이름은 기기에서 온 값이라 글자로만 넣는다)
+    function folderDone(box, folder, n) {
+      const b = document.createElement('b');
+      b.textContent = '저장했어요!';
+      box.replaceChildren(b, ` ${n > 1 ? `${n}장 모두 ` : ''}‘${folder}’ 폴더에 넣었어요. 갤러리 첫 화면(사진)에 바로 보여요.`);
+      box.hidden = false;
+      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function folderFail(box, e) {
+      const b = document.createElement('b');
+      if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
+        b.textContent = '그 폴더에는 저장할 수 없어요.';
+        box.replaceChildren(b, ' ‘Pictures’ 폴더를 골라 다시 눌러 주세요.');
+      } else {
+        b.textContent = '이 휴대폰에서는 폴더에 바로 저장이 안 돼요.';
+        box.replaceChildren(b, ' 위의 저장 단추를 써 주세요 (갤러리 → 앨범 → 다운로드에 담겨요).');
+      }
+      box.hidden = false;
+      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      folderLog(`${e && e.name}: ${e && e.message}`);
+    }
+
+    if (FOLDER_OK) {
+      const gbtn = $('#saveGallery');
+      const glabel = gbtn.textContent;
+      gbtn.hidden = false;
+      $('#galleryHow').hidden = false;
+      gbtn.addEventListener('click', async () => {
+        gbtn.disabled = true;
+        const tag = ($('main').dataset.aid || '').slice(0, 6);
+        try {
+          const folder = await saveToFolder(
+            links.map((a, i) => ({ url: `/media/${a.dataset.sid}/final.jpg`, name: `yeongsangang_${tag}_${String(i + 1).padStart(2, '0')}.jpg` })),
+            (i, n) => { gbtn.textContent = `갤러리에 넣는 중 ${i + 1} / ${n}`; },
+          );
+          folderDone($('#savedGuide'), folder, total);
+        } catch (e) {
+          if (!(e && e.name === 'AbortError')) folderFail($('#savedGuide'), e);
+        } finally {
+          gbtn.disabled = false;
+          gbtn.textContent = glabel;
+        }
+      });
     }
 
     btn.addEventListener('click', async () => {
