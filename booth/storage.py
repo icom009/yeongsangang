@@ -31,6 +31,14 @@ def path(sid, kind):
     return config.OUT_DIR / f'{sid}_{kind}.jpg'
 
 
+def taken_at(sid):
+    """완성한 시각 (final 파일의 시각). 나중에 다시 그리는 AI·효과 사진에도 같은 날짜 도장을 찍으려고."""
+    try:
+        return path(sid, 'final').stat().st_mtime
+    except OSError:
+        return None
+
+
 def remove(sid):
     """한 사진의 모든 파일을 지운다 (관리 화면에서 지울 때)."""
     removed = 0

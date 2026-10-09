@@ -887,6 +887,8 @@ function fitMessage() {
 
 function enterWrite() {
   $('#cardPhoto').src = chosenShot();
+  const now = new Date();
+  $('#cardStamp').src = `/api/stamp.png?d=${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
   show('write');
   // 노트북·PC는 바로 칠 수 있게 입력칸에 커서를 둔다 (휴대폰은 자판이 갑자기 올라오지 않게 그대로)
   if (FINE_POINTER) setTimeout(() => $('#msgInput').focus({ preventScroll: true }), 300);

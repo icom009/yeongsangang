@@ -270,7 +270,8 @@ def _render_group(lead, members, message, font=None):
     if not all(p.exists() for p in paths):
         return
     try:
-        frame.render(paths if len(paths) > 1 else paths[0], message, storage.path(lead, 'aifinal'), font)
+        frame.render(paths if len(paths) > 1 else paths[0], message, storage.path(lead, 'aifinal'), font,
+                     storage.taken_at(lead))
         if len(paths) > 1:
             # 프레임 없는 AI 4컷을 대표 사진 자리에 합쳐 두고, 낱장은 지운다
             frame.save_grid(paths, storage.path(lead, 'ai'))

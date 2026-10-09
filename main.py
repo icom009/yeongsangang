@@ -223,6 +223,13 @@ def frame_image():
     return Response(storage.frame_jpeg(), media_type=JPEG, headers=LONG_CACHE)
 
 
+@app.get('/api/stamp.png')
+def stamp_image():
+    """한마디 화면 미리보기에 겹치는 오늘 날짜 도장 ('26 10 9). 프레임 크기의 투명 PNG라 완성 사진과 같은 그림이
+    같은 자리에 보인다. 주소에 브라우저의 날짜(?d=)가 붙어 날이 바뀌면 새로 받는다."""
+    return Response(frame.stamp_overlay(), media_type='image/png', headers={'Cache-Control': 'private, max-age=600'})
+
+
 @app.get('/font/message.ttf')
 def message_font():
     return FileResponse(config.FONT, media_type='font/ttf', headers=LONG_CACHE)

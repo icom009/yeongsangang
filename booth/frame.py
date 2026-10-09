@@ -1,10 +1,13 @@
 """완성 사진 프레임 렌더링과 QR코드. 1컷과 4컷(인생네컷)을 같은 프레임에 담는다."""
+import datetime
 import io
+import math
+import time
 from functools import lru_cache
 from pathlib import Path
 
 import qrcode
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 from qrcode.image.pil import PilImage
 
 from . import config
@@ -180,14 +183,98 @@ def save_grid(paths, out_path):
     return out_path
 
 
-def render(shots, message, out_path, font=None):
-    """shots: 사진 하나(1컷) 또는 네 개(4컷). 파일 경로나 이미 열린 그림. font: 한마디 글씨체 id (없으면 기본)."""
+# ---------- 날짜 도장 ----------
+# 필름 카메라가 사진 오른쪽 아래에 찍던 주황색 날짜 ('26 10 9). 7자리 숫자판을 직접 그려서 글꼴 파일이 필요 없다.
+# 한마디 화면 미리보기(/api/stamp.png)도 같은 그림을 겹쳐 보여 준다
+STAMP_H = 34               # 숫자 높이 (프레임 1024x1536 기준 px)
+STAMP_GAP = (26, 22)       # 사진 칸 오른쪽·아래 끝에서 띄우는 거리
+STAMP_CORE = (255, 156, 52)
+STAMP_GLOW = (255, 72, 0)
+_SEGS = {'0': 'abcdef', '1': 'bc', '2': 'abged', '3': 'abgcd', '4': 'fgbc',
+         '5': 'afgcd', '6': 'afgedc', '7': 'abc', '8': 'abcdefg', '9': 'abcdfg'}
+
+
+def stamp_text(when=None):
+    d = datetime.datetime.fromtimestamp(when or time.time(), config.LOCAL_TZ)
+    return f"'{d:%y} {d.month} {d.day}"
+
+
+@lru_cache(maxsize=4)
+def _stamp(text):
+    """날짜 도장 그림(RGBA)과 프레임 위 왼쪽 위 좌표."""
+    S = 4  # 4배로 그려 줄여서 가장자리를 매끄럽게
+    h = STAMP_H * S
+    w, t = h * .52, h * .17                 # 숫자 폭, 획 굵기
+    gap, space, tick = h * .2, h * .42, h * .24
+    skew = math.tan(math.radians(8))       # 살짝 기울인다
+    pad = round(h * .4)                    # 번짐 자리
+    adv = {"'": tick, ' ': space}
+    width = sum(adv.get(c, w + gap) for c in text) - gap
+    core = Image.new('L', (round(width + h * skew) + pad * 2, h + pad * 2), 0)
+    d = ImageDraw.Draw(core)
+
+    def poly(pts, x0):
+        d.polygon([(pad + x0 + x + (h - y) * skew, pad + y) for x, y in pts], fill=255)
+
+    e = t * .14  # 획 사이 틈
+    def hseg(x1, x2, y):
+        return [(x1 + e, y), (x1 + e + t / 2, y - t / 2), (x2 - e - t / 2, y - t / 2),
+                (x2 - e, y), (x2 - e - t / 2, y + t / 2), (x1 + e + t / 2, y + t / 2)]
+
+    def vseg(x, y1, y2):
+        return [(x, y1 + e), (x + t / 2, y1 + e + t / 2), (x + t / 2, y2 - e - t / 2),
+                (x, y2 - e), (x - t / 2, y2 - e - t / 2), (x - t / 2, y1 + e + t / 2)]
+
+    L, R, T, M, B = t / 2, w - t / 2, t / 2, h / 2, h - t / 2
+    segs = {'a': hseg(L, R, T), 'b': vseg(R, T, M), 'c': vseg(R, M, B), 'd': hseg(L, R, B),
+            'e': vseg(L, M, B), 'f': vseg(L, T, M), 'g': hseg(L, R, M)}
+    x = 0
+    for c in text:
+        if c in _SEGS:
+            for s in _SEGS[c]:
+                poly(segs[s], x)
+        elif c == "'":
+            poly([(t * .1, 0), (t * .9, 0), (t * .6, h * .32), (t * .1, h * .32)], x)
+        x += adv.get(c, w + gap)
+
+    # 빛으로 필름에 박힌 것처럼: 가까운 번짐은 진하게, 먼 번짐은 옅게
+    glow = ImageChops.lighter(core.filter(ImageFilter.GaussianBlur(h * .05)),
+                              core.filter(ImageFilter.GaussianBlur(h * .16)).point(lambda v: v * .7))
+    # 노을·갈대처럼 주황빛 장면에서도 읽히게 아래에 옅은 그늘을 깐다
+    shade = core.filter(ImageFilter.GaussianBlur(h * .12)).point(lambda v: min(255, v * 1.1))
+    img = Image.new('RGBA', core.size, (30, 8, 0, 0))
+    img.putalpha(shade)
+    for color, alpha in ((STAMP_GLOW, glow), (STAMP_CORE, core)):
+        layer = Image.new('RGBA', core.size, color + (0,))
+        layer.putalpha(alpha)
+        img = Image.alpha_composite(img, layer)
+    img = img.resize((round(img.width / S), round(img.height / S)), Image.LANCZOS)
+    p = pad / S
+    _, _, x2, y2 = config.FRAME_HOLE
+    return img, (round(x2 - STAMP_GAP[0] - (img.width - p)), round(y2 - STAMP_GAP[1] - (img.height - p)))
+
+
+def stamp_overlay(when=None):
+    """미리보기용: 프레임 크기의 투명 PNG에 날짜 도장만. render()가 찍는 것과 같은 그림, 같은 자리."""
+    img, pos = _stamp(stamp_text(when))
+    out = Image.new('RGBA', (1024, 1536), (0, 0, 0, 0))
+    out.paste(img, pos)
+    buf = io.BytesIO()
+    out.save(buf, 'PNG', optimize=True)
+    return buf.getvalue()
+
+
+def render(shots, message, out_path, font=None, when=None):
+    """shots: 사진 하나(1컷) 또는 네 개(4컷). 파일 경로나 이미 열린 그림. font: 한마디 글씨체 id (없으면 기본).
+    when: 사진 오른쪽 아래 날짜 도장의 시각 (없으면 지금)."""
     paths = [shots] if isinstance(shots, (str, Path, Image.Image)) else list(shots)
     frame = Image.open(config.FRAME).convert('RGB')
     boxes = cells(len(paths))
     radius = config.FRAME_HOLE_RADIUS if len(paths) == 1 else max(6, config.FRAME_HOLE_RADIUS // 2)
     for p, (x, y, w, h) in zip(paths, boxes):
         frame.paste(_fit(_open(p), w, h), (x, y), _rounded_mask((w, h), radius))
+    stamp, pos = _stamp(stamp_text(when))
+    frame.paste(stamp, pos, stamp)
 
     bx1, by1, bx2, by2 = config.FRAME_TEXT_BOX
     bw, bh = bx2 - bx1, by2 - by1

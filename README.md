@@ -159,6 +159,7 @@ docker compose --env-file .env.local up -d        # 부스 화면: http://localh
 | `YS_OPEN` | 꺼짐 | `1`이면 공개 주소에서도 부스 키 없이 촬영 화면과 API를 모두 엽니다 |
 | `YS_COMPOSE_SLOTS` | 2 | 동시에 합성하는 사진 수. 나머지는 차례로 기다립니다. 한 장에 메모리 약 350MB. 코어가 8개 이상이면 3~4 |
 | `YS_KEEP_HOURS` | 72 | 사진 보관 시간. 지나면 자동 삭제 |
+| `YS_UTC_OFFSET` | 9 | 사진 오른쪽 아래 날짜 도장('26 10 9)의 시간대 (UTC와의 시차, 한국은 9) |
 | `YS_MATTING_SIZE` | 640 | 합성 정밀도(내부 해상도). 서버가 느리면 512로 낮추세요 |
 | `YS_DEVICE` | auto | 매팅 장치. `auto`면 GPU(CUDA)가 있을 때 GPU, `cpu`면 항상 CPU |
 | `YS_MATTING_MODEL` | mobilenetv3 | `resnet50`은 머리카락 경계가 더 섬세합니다(GPU 서버용, 이미지 빌드 때 받아 둠) |

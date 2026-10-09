@@ -1,3 +1,4 @@
+import datetime
 import os
 from pathlib import Path
 
@@ -171,6 +172,8 @@ FRAME_HOLE_RADIUS = 18
 FRAME_GAP = 10  # 4컷일 때 사진 사이 틈 (사진 칸을 2x2로 나눠도 각 칸이 4:3이다)
 FRAME_TEXT_BOX = (90, 1000, 934, 1185)
 TEXT_COLOR = '#4a3420'
+# 사진 오른쪽 아래 날짜 도장('26 10 9)의 시간대. 서버 컨테이너는 UTC라서 따로 둔다 (한국은 서머타임이 없어 +9 고정)
+LOCAL_TZ = datetime.timezone(datetime.timedelta(hours=float(os.environ.get('YS_UTC_OFFSET', '9'))))
 DEFAULT_MESSAGE = '오늘도 함께 행복하자'
 
 # 장소 이야기: 촬영 화면에서 배경을 고를 때마다 보여 준다. 현장에 맞게 자유롭게 고쳐 쓰세요

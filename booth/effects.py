@@ -283,10 +283,10 @@ async def _make(sid, fx, rec, sources):
 def _save(sid, fx, imgs, message, font=None):
     if len(imgs) == 1:
         imgs[0].save(storage.path(sid, f'fx_{fx}'), quality=93, subsampling=0)
-        frame.render(imgs[0], message, storage.path(sid, f'fxf_{fx}'), font)
+        frame.render(imgs[0], message, storage.path(sid, f'fxf_{fx}'), font, storage.taken_at(sid))
     else:
         frame.save_grid(imgs, storage.path(sid, f'fx_{fx}'))
-        frame.render(imgs, message, storage.path(sid, f'fxf_{fx}'), font)
+        frame.render(imgs, message, storage.path(sid, f'fxf_{fx}'), font, storage.taken_at(sid))
 
 
 _faces = None
