@@ -381,10 +381,11 @@ def media(sid: str, kind: str, download: int = 0):
     if download:
         name = {'final': 'yeongsangang_frame.jpg', 'aifinal': 'yeongsangang_ai_frame.jpg',
                 'ai': 'yeongsangang_ai.jpg'}.get(kind)
-        if name is None:  # AI 효과 사진: fxf_webtoon -> yeongsangang_webtoon_frame.jpg
+        if name is None:  # AI 효과 사진: fxf_poster -> yeongsangang_poster.jpg (예전 효과만 프레임 사진이 따로 있다)
             fx = kind.split('_', 1)[-1]
-            name = (f'yeongsangang_{fx}_frame.jpg' if kind.startswith('fxf_') else
-                    f'yeongsangang_{fx}.jpg' if kind.startswith('fx_') else 'yeongsangang_photo.jpg')
+            framed = kind.startswith('fxf_') and fx not in config.EFFECT_BY_ID
+            name = (f'yeongsangang_{fx}_frame.jpg' if framed else
+                    f'yeongsangang_{fx}.jpg' if kind.startswith(('fx_', 'fxf_')) else 'yeongsangang_photo.jpg')
         # 사진마다 이름이 달라야 단체 묶음을 한꺼번에 받을 때 '(1)', '(2)'가 붙지 않는다 (id는 영문·숫자·-_뿐)
         name = name.replace('.jpg', f'_{sid[:6]}.jpg')
         headers['Content-Disposition'] = f'attachment; filename="{name}"'

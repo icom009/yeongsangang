@@ -12,7 +12,7 @@ from .compose import foreground_mask, read_image
 
 _ID = re.compile(r'^[A-Za-z0-9_-]{10,32}$')
 # shot: 장소 빛 필터 적용, plain: 필터 없는 합성, ai: AI 빛 보정 버전, aifinal: 그 프레임 사진,
-# c0~c3: 네 컷의 낱장(AI 효과용), fx_효과: AI 효과 사진, fxf_효과: 그 프레임 사진
+# c0~c3: 네 컷의 낱장(AI 효과용), fxf_효과: AI 효과 완성 그림, fx_효과: 예전 효과의 프레임 없는 사진
 KINDS = ('shot', 'plain', 'final', 'ai', 'aifinal', 'c0', 'c1', 'c2', 'c3') + tuple(
     f'{k}_{fx}' for fx in config.EFFECT_IDS for k in ('fx', 'fxf'))
 

@@ -111,42 +111,131 @@ OPENAI_KEY = (os.environ.get('YS_OPENAI_KEY') or os.environ.get('OPENAI_KEY')
 GPT_PRICE = {'text': 5.0, 'image': 8.0, 'output': 30.0}
 GPT_MODEL = os.environ.get('YS_GPT_MODEL') or 'gpt-image-2'
 GPT_QUALITY = os.environ.get('YS_GPT_QUALITY') or 'medium'  # low | medium | high
-GPT_SIZE = '1024x768'  # 사진과 같은 4:3. gpt-image-2는 16의 배수면 어떤 크기든 받는다
-GPT_DAILY = int(os.environ.get('YS_GPT_DAILY') or 500)  # 하루 최대 생성 장수 (비용 상한, 네 컷은 4장)
-GPT_PARALLEL = max(1, int(os.environ.get('YS_GPT_PARALLEL') or 4))  # 동시에 보내는 요청 수 (네 컷을 한 번에)
+# 세 효과 모두 세로 한 장으로 새로 그린다. 프레임 없이 그 그림 자체가 결과물이다
+GPT_SIZE = '1024x1536'  # gpt-image-2는 16의 배수면 어떤 크기든 받는다
+GPT_DAILY = int(os.environ.get('YS_GPT_DAILY') or 500)  # 하루 최대 생성 장수 (비용 상한, 네 컷도 한 번에 1장)
+GPT_PARALLEL = max(1, int(os.environ.get('YS_GPT_PARALLEL') or 4))  # 동시에 보내는 요청 수
 GPT_TIMEOUT = float(os.environ.get('YS_GPT_TIMEOUT') or 150)
 
-_KEEP = ('Keep every person\'s face, identity, facial expression, hairstyle, skin tone and clothing '
-         'exactly as they are, and keep the same number of people. ')
+# 효과: 웹툰 · 영화 포스터 · 명화 (2026-10-10 사용자 요청. 예전 '장면 연출·수채화·웹툰 그림체·필름'은 사진을
+# 그대로 두고 화풍만 바꿔서 밋밋했다). gpt-image-2는 한글을 정확히 써서 말풍선·포스터 제목·명패 글씨도 GPT가 쓴다
+# (시험한 6장 모두 한 글자도 틀리지 않았다). 네 컷은 컷 네 장을 한 번에 보내 한 장으로 만든다 (웹툰은 네 칸).
+# 프롬프트의 {line}은 방문객 한마디(없거나 길면 기본 문구), {keep}은 사람을 지키라는 공통 문장이다.
+# 사진 속 사람만 쓰라고 못 박는다: '가족사진'이라고 했을 때 GPT가 혼자 찍은 아이 옆에 어른 둘을 지어낸 일이 있었다
+FX_MANY = ('These {n} photos were taken one after another at a photo booth, of the same people at {n} different '
+           'places along the Yeongsan River. ')
+# {count}는 사진에서 센 사람 수 문장. 한마디에 '가족'이 들어가면 혼자 찍은 아이 옆에 엄마·아빠를 지어내 그렸다
+# (2026-10-10 시험, 얼굴 1명 -> 6명). 인원을 숫자로 못 박고, 글은 그림 내용이 아니라고 따로 일러 둔다
+FX_KEEP = ("{count}Keep every person's face, identity, hairstyle, skin tone and clothing recognizable, and keep the "
+           'same number of people as in the {photo}. Do not add any other people. The Korean text is only a caption '
+           'the visitor wrote: even if it mentions family, friends or anyone else, draw only the people who are in '
+           'the {photo}. ')
+FX_BUBBLE = '와, 영산강 진짜 예쁘다!'       # 한마디가 없을 때 웹툰 말풍선
+FX_TAGLINE = '이 가을, 영산강이 당신을 부른다'  # 한마디가 없을 때 포스터 문구
+FX_LINE_MAX = 28                            # 이보다 긴 한마디는 그림 속 글씨로 넣지 않고 기본 문구를 쓴다
 EFFECTS = [
-    {'id': 'scene', 'name': 'AI 장면 연출', 'desc': '표정은 그대로, 이곳에 어울리는 기념사진으로',
-     # 포즈는 정해 주지 않고 GPT에게 맡긴다. 배경은 effects.py가 원본으로 다시 덮어 그대로 둔다
-     'keep_background': True,
-     # '가족사진'이라고 하면 GPT가 없던 가족을 지어내 넣었다(혼자 찍은 아이 옆에 어른 둘). 그 말은 쓰지 않고,
-     # 사진 속 사람만 쓰라고 못 박는다
-     'prompt': 'Turn this into a natural, heartwarming commemorative photo of the people in this picture at '
-               'this place, as if a professional photographer took it on the spot. Use only the people who are '
-               'already in the photo: do not add, remove, duplicate or replace anyone. If there is only one '
-               'person, keep it a photo of that one person. Freely choose natural, relaxed poses and positions '
-               'for them that suit the scene. Keep each person\'s face, identity, facial expression, hairstyle, '
-               'skin tone and clothing exactly as they are. Do not change the background at all: keep the '
-               'scenery, sky, water, boats, buildings and colors exactly as they are. Photorealistic, lit by '
-               'the same light as the scene.'},
-    {'id': 'watercolor', 'name': '수채화 동화', 'desc': '부드러운 수채화 그림책처럼',
-     'prompt': 'Turn this photo into a soft, hand-painted watercolor storybook illustration with gentle washes '
-               'and paper texture. Keep the same composition and scenery, and keep the same people with '
-               'recognizable faces, the same facial expressions, poses and clothing colors.'},
-    {'id': 'webtoon', 'name': '웹툰', 'desc': '밝고 깔끔한 웹툰 그림체로',
-     'prompt': 'Redraw this photo as a clean, bright Korean webtoon-style illustration with crisp line art and '
-               'soft cel shading. Keep the same composition and scenery, and keep the same people with '
-               'recognizable faces, the same facial expressions, poses and clothing.'},
-    {'id': 'film', 'name': '필름 사진', 'desc': '90년대 필름 카메라 느낌으로',
-     'prompt': 'Make this photo look like a warm vintage 35mm film photograph from the 1990s: soft film grain, '
-               'gently faded colors and a faint light leak. ' + _KEEP + 'Keep the poses and the composition '
-               'exactly the same.'},
+    {'id': 'toon', 'name': '웹툰', 'desc': '내가 주인공인 웹툰 한 편', 'line': FX_BUBBLE,
+     'panels': True,  # 같은 사람이 칸마다 나오므로 얼굴 수 검사를 칸 수만큼 늘려 준다
+     'one': 'Turn this photo into one page of a Korean webtoon (vertical-scroll web comic) starring the people in it. '
+            'Polished, colorful modern Korean webtoon art: clean confident line art, cel shading, glossy expressive '
+            'eyes, dynamic angles.\n'
+            'Layout: one tall page with exactly 3 panels stacked from top to bottom, separated by clean white gutters.\n'
+            'Panel 1 (wide): this same place, the people arriving and looking around in wonder.\n'
+            'Panel 2 (close-up): a dramatic close-up of their faces with sparkling eyes, speed lines and a delighted, '
+            'excited expression.\n'
+            'Panel 3 (the big moment): the people in the same pose as in the original photo, with sparkles, festive '
+            'confetti and a warm glow.\n'
+            'Put exactly one speech bubble in panel 3 with this Korean text, written correctly: "{line}"\n'
+            'Add one big hand-drawn Korean sound effect in panel 2: "두근"\n'
+            '{keep}No other text anywhere.',
+     'many': FX_MANY + 'Turn them into one page of a Korean webtoon (vertical-scroll web comic) about their day. '
+             'Polished, colorful modern Korean webtoon art: clean confident line art, cel shading, glossy expressive '
+             'eyes, dynamic angles.\n'
+             'Layout: one tall page with exactly {n} panels stacked from top to bottom, separated by clean white '
+             'gutters, one panel for each photo in the same order. Each panel shows that photo\'s place and the '
+             'people in a lively version of their pose there, with comic touches such as sparkles, speed lines or '
+             'little hearts.\n'
+             'Put exactly one speech bubble in the last panel with this Korean text, written correctly: "{line}"\n'
+             'Add one big hand-drawn Korean sound effect in one of the panels: "두근"\n'
+             '{keep}No other text anywhere.'},
+    {'id': 'poster', 'name': '영화 포스터', 'desc': '내가 주연인 영화 포스터', 'line': FX_TAGLINE,
+     'one': 'Turn this photo into a complete, finished Korean blockbuster movie poster starring the people in it. '
+            'Portrait format.\n'
+            'Make it truly cinematic and dramatic, like a big-budget Korean film poster: a heroic low-angle '
+            'composition, the people large in the foreground from the chest up with determined, confident gazes, '
+            'strong rim light, atmospheric haze, glowing particles and light rays, rich teal-and-orange color grading, '
+            'and an epic, dramatic version of this same place and its sky behind them.\n'
+            '{keep}\n'
+            'Typography (render the Korean text exactly as written, with no other text anywhere):\n'
+            '- Near the top, a small elegant tagline: “{line}”\n'
+            '- In the lower part, a huge, bold, dramatic movie title with a metallic, cinematic texture: {title}\n'
+            '- Below the title, small text: 2026 나주영산강축제\n'
+            '- At the very bottom, small text: {date} 대개봉',
+     'many': FX_MANY + 'Turn them into a complete, finished Korean blockbuster movie poster starring these people. '
+             'Each person appears only once on the poster, even though they appear in several photos. '
+             'Portrait format.\n'
+             'Make it truly cinematic and dramatic, like a big-budget Korean film poster: a heroic low-angle '
+             'composition, the people large in the foreground from the chest up with determined, confident gazes, '
+             'strong rim light, atmospheric haze, glowing particles and light rays, rich teal-and-orange color '
+             'grading, and an epic, dramatic version of the scenery from the first photo behind them.\n'
+             '{keep}\n'
+             'Typography (render the Korean text exactly as written, with no other text anywhere):\n'
+             '- Near the top, a small elegant tagline: “{line}”\n'
+             '- In the lower part, a huge, bold, dramatic movie title with a metallic, cinematic texture: {title}\n'
+             '- Below the title, small text: 2026 나주영산강축제\n'
+             '- At the very bottom, small text: {date} 대개봉'},
+    {'id': 'art', 'name': '명화', 'desc': '미술관에 걸린 명화 속 주인공',
+     'one': 'Repaint this photo as a famous museum masterpiece: {style}. The people in the photo are the subjects of '
+            'the painting, in the same pose, with this same place as the scenery, all painted in the same brushwork.\n'
+            '{display}\n'
+            '{keep}There is nobody else anywhere, including in the museum. Portrait format. No other text anywhere.',
+     'many': FX_MANY + 'Paint them as one famous museum masterpiece: {style}. These people are the subjects of the '
+             'painting, each person only once even though they appear in several photos, with the scenery from the '
+             'first photo, all painted in the same brushwork.\n'
+             '{display}\n'
+             '{keep}There is nobody else anywhere, including in the museum. Portrait format. No other text anywhere.'},
 ]
-EFFECT_IDS = [e['id'] for e in EFFECTS]
-EFFECT_BY_ID = {e['id']: e for e in EFFECTS}
+# 명화의 화풍. (이름, 프롬프트, 거는 방식)
+ART_STYLES = {
+    'monet': ('모네', 'an oil painting in the style of Claude Monet\'s impressionism (like "Impression, Sunrise" and '
+              'his garden paintings), with visible thick brushstrokes, shimmering broken color and glowing light',
+              'frame'),
+    'gogh': ('고흐', 'an oil painting in the style of Vincent van Gogh (like "The Starry Night" and his wheat fields), '
+             'with bold swirling impasto brushstrokes, vivid yellows and deep blues', 'frame'),
+    'renoir': ('르누아르', 'an oil painting in the style of Pierre-Auguste Renoir, with soft, warm, feathery brushwork, '
+               'luminous skin and dappled sunlight', 'frame'),
+    'klimt': ('클림트', 'a painting in the style of Gustav Klimt\'s golden period (like "The Kiss"), with shimmering gold '
+              'leaf, ornamental patterns and mosaic-like decoration around the people, and realistic, gentle faces',
+              'frame'),
+    'kim': ('김홍도', 'a Joseon-dynasty Korean genre painting in the style of Kim Hong-do, with lively ink lines and soft '
+            'light colors on aged hanji paper', 'scroll'),
+}
+ART_DISPLAY = {
+    'frame': 'Show the finished painting hanging on a dark green wall of a grand art museum, in an ornate, carved gold '
+             'frame, lit by a warm gallery spotlight from above, the painting filling most of the image. Below the '
+             'frame, a small brass plaque with this Korean text, written exactly: {art_title}',
+    'scroll': 'Show the finished painting mounted as a traditional Korean hanging scroll with silk borders on the wall '
+              'of an art museum, lit by a soft gallery spotlight, the painting filling most of the image. Below it, a '
+              'small museum label with this Korean text, written exactly: {art_title}',
+}
+# 장소마다 영화 제목·명화 화풍·그림 제목. 현장에 맞게 자유롭게 고쳐 쓰세요 (네 컷은 첫 컷의 장소를 쓴다)
+FX_BY_BG = {
+    1: {'title': '영산포의 노을', 'art': 'monet', 'art_title': '영산포, 해 질 녘'},
+    2: {'title': '물돌이 대모험', 'art': 'gogh', 'art_title': '느러지의 한낮'},
+    3: {'title': '들녘의 바람', 'art': 'gogh', 'art_title': '나주 들녘'},
+    4: {'title': '영산강의 밤', 'art': 'gogh', 'art_title': '영산강의 별이 빛나는 밤'},
+    5: {'title': '코스모스 필 무렵', 'art': 'renoir', 'art_title': '코스모스 정원에서'},
+    6: {'title': '황포돛배의 귀환', 'art': 'kim', 'art_title': '황포돛배 뱃놀이'},
+    7: {'title': '양귀비 꽃이 피면', 'art': 'monet', 'art_title': '양귀비 들판'},
+    8: {'title': '축제의 주인공', 'art': 'klimt', 'art_title': '축제의 날'},
+}
+FX_DEFAULT = {'title': '영산강', 'art': 'monet', 'art_title': '영산강의 하루'}
+# 예전 효과: 더는 만들지 않지만, 이미 만든 사진은 보관 기간 동안 휴대폰 화면에 그대로 보여 준다
+RETIRED_EFFECTS = [{'id': 'scene', 'name': 'AI 장면 연출'}, {'id': 'watercolor', 'name': '수채화 동화'},
+                   {'id': 'webtoon', 'name': '웹툰 그림체'}, {'id': 'film', 'name': '필름 사진'}]
+EFFECT_IDS = [e['id'] for e in EFFECTS + RETIRED_EFFECTS]  # 파일 이름에 쓰는 모든 효과 (지우기·내려받기용)
+EFFECT_BY_ID = {e['id']: e for e in EFFECTS}               # 지금 만들 수 있는 효과
+EFFECT_NAMES = {e['id']: e['name'] for e in EFFECTS + RETIRED_EFFECTS}
 
 
 # 얼굴 세기(UltraFace RFB-640, MIT, 1.5MB). GPT가 없던 사람을 그려 넣었는지 확인한다 (CPU로 돈다)

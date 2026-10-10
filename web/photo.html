@@ -155,6 +155,11 @@
     .gen.done .gen-stage img { filter: none; transform: none; animation: none; }
     .gen.done .gen-stage::before, .gen.done .gen-scan, .gen.done .gen-spark { display: none; }
     .gen.done .gen-pct { opacity: 0; }
+    /* 완성된 세로 그림(웹툰·포스터·명화)은 잘리지 않게 통째로 보여 주고, 진행 단계 대신 저장 단추를 둔다 */
+    .gen.done .gen-stage { max-height: 62vh; margin: 0 auto; }  /* 낮은 화면에선 높이에 맞춰 폭이 줄어든다 */
+    .gen.done .gen-stage img { object-fit: contain; }
+    .gen.done .gen-bar, .gen.done .gen-steps { display: none; }
+    .gen.done .gen-foot { margin-top: 4px; }
     .gen.fail .gen-stage::before, .gen.fail .gen-scan, .gen.fail .gen-spark { display: none; }
     .gen.fail .gen-bar i { background: rgba(255, 180, 168, .6); animation: none; box-shadow: none; }
     /* 닫고 기다릴 때 아래쪽에 남는 작은 진행 막대 */
@@ -203,6 +208,7 @@
     <div class="actions" style="margin-top:18px">
       <button class="btn btn-sail btn-lg" id="saveBtn" type="button">사진 저장하기</button>
       <button class="btn btn-glass" id="saveShotBtn" type="button">프레임 없는 사진 저장</button>
+      <button class="btn btn-glass" id="saveAllVer" type="button" hidden></button>
       <button class="btn btn-glass" id="saveGallery" type="button" hidden>📁 갤러리에 바로 저장 (사진 폴더)</button>
     </div>
     <p class="tip" style="margin-top:10px" id="galleryHow" hidden>‘갤러리에 바로 저장’을 누르면 폴더 고르기 화면이 떠요. <b>Pictures</b> 폴더를 고르고 ‘이 폴더 사용’ → ‘허용’을 누르면 갤러리 첫 화면에 바로 들어가요.</p>
@@ -232,13 +238,14 @@
         <ol class="gen-steps" id="genSteps">
           <li data-step="send">사진 보내기</li>
           <li data-step="draw">AI가 새로 그리는 중</li>
-          <li data-step="finish">얼굴 확인 · 배경 맞추기</li>
+          <li data-step="finish">얼굴 확인 · 마무리</li>
           <li data-step="done">완성</li>
         </ol>
         <div class="gen-foot">
           <span id="genTime"></span>
           <span class="btns">
             <button class="btn btn-sail btn-sm" id="genRetry" type="button" hidden>다시 시도</button>
+            <button class="btn btn-sail btn-sm" id="genSave" type="button" hidden>📥 저장하기</button>
             <button class="btn btn-glass btn-sm" id="genHide" type="button">닫고 기다리기</button>
           </span>
         </div>
@@ -281,6 +288,7 @@
     // base: 부스에서 고른 사진, light: AI 빛 보정, 그 밖: 휴대폰에서 누른 AI 효과
     const versions = { base: { final: `/media/${sid}/final.jpg`, photo: `/media/${sid}/shot.jpg` } };
     const fxState = {};   // 효과 id -> idle | pending | failed | limit
+    const names = {};     // 이미 만든 효과의 이름 (지금은 없는 예전 효과도 이름과 함께 보여 준다)
     let catalog = [];
     let cur = 'base';
     let lightPending = false;
@@ -338,6 +346,9 @@
       }).catch(() => {});
     }
 
+    // 저장 파일 이름: 사진마다·판마다 달라야 여러 장 받을 때 '(1)', '(2)'가 붙지 않는다
+    const fileName = (v, photo) => `yeongsangang_${sid.slice(0, 6)}${v === 'base' ? '' : `_${v}`}${photo ? '_photo' : ''}.jpg`;
+
     function setVersion(v) {
       if (!versions[v]) return;
       cur = v;
@@ -346,8 +357,10 @@
       amb.src = u.final;             // 내 사진의 빛이 화면 전체에 번지게
       note.textContent = v === 'base' ? '' : (v === 'light' ? NOTES.light : NOTES.fx);
       note.hidden = v === 'base';
+      // 웹툰·포스터·명화는 프레임 없는 그림 한 장이 완성본이라 '프레임 없는 사진'이 따로 없다
+      $('#saveShotBtn').hidden = u.photo === u.final;
       renderChips();
-      prefetch(u.final, 'yeongsangang.jpg');
+      prefetch(u.final, fileName(v));
     }
 
     // 사진 고르기 단추: 기본 · 빛 보정(준비되면) · AI 효과(누르면 그때 만든다)
@@ -378,8 +391,80 @@
         row.appendChild(lab);
         catalog.forEach((e) => add(e.id, e.name, versions[e.id] ? 'ready' : (fxState[e.id] || 'idle')));
       }
+      // 예전에 있던 효과로 이미 만든 사진 (지금은 새로 만들 수 없지만 보고 저장할 수 있다)
+      Object.keys(versions).filter((id) => !['base', 'light'].includes(id) && !catalog.some((e) => e.id === id))
+        .forEach((id) => add(id, names[id] || 'AI 사진', 'ready'));
       row.hidden = row.querySelectorAll('button').length <= 1;
+      renderSaveAll();
     }
+
+    // ---------- 만든 사진 모두 저장 (기본 + 빛 보정 + AI 효과) ----------
+    // 아이폰: 공유 시트의 '이미지 n개 저장'이 사진 앱에 한꺼번에 넣는다.
+    // 안드로이드·컴퓨터: 한 장씩 차례로 내려받는다 (안드로이드는 갤러리 → 앨범 → 다운로드)
+    let allFiles = null;  // 공유 시트로 넘길 사진들 (판이 늘면 다시 받는다)
+    const allItems = () => Object.keys(versions).map((v) => ({ url: versions[v].final, name: fileName(v) }));
+    function renderSaveAll() {
+      const btn = $('#saveAllVer');
+      const n = Object.keys(versions).length;
+      btn.hidden = n < 2;
+      if (!btn.disabled) btn.textContent = `만든 사진 모두 저장 (${n}장)`;
+      if (allFiles && allFiles.length !== n) allFiles = null;
+    }
+    async function downloadAll(items) {
+      const btn = $('#saveAllVer');
+      btn.disabled = true;
+      tip.textContent = '‘여러 파일 다운로드’를 묻는 창이 뜨면 ‘허용’을 눌러 주세요.';
+      for (let i = 0; i < items.length; i++) {
+        btn.textContent = `내려받는 중 ${i + 1} / ${items.length}`;
+        const a = document.createElement('a');
+        a.href = `${items[i].url}?download=1`;
+        a.download = items[i].name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        await new Promise((r) => setTimeout(r, 900));
+      }
+      btn.disabled = false;
+      renderSaveAll();
+      if (ANDROID) {
+        const g = $('#savedGuide');
+        g.hidden = false;
+        g.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+    $('#saveAllVer').addEventListener('click', async () => {
+      const btn = $('#saveAllVer');
+      const items = allItems();
+      const share = async () => {
+        try {
+          await navigator.share({ files: allFiles, title: '영산강 포토부스' });
+        } catch (e) {
+          if (e && e.name === 'NotAllowedError') {  // 받는 동안 '누른 직후'가 지나 버림: 한 번 더 누르게
+            btn.textContent = `준비됐어요 · 눌러서 ${allFiles.length}장 저장`;
+            return;
+          }
+          if (!(e && e.name === 'AbortError')) { downloadAll(items); return; }
+        }
+        renderSaveAll();
+      };
+      if (allFiles) { await share(); return; }
+      const probe = [new File([new Blob(['x'])], 'x.jpg', { type: 'image/jpeg' })];
+      if (!canShareFiles(probe)) { downloadAll(items); return; }
+      btn.disabled = true;
+      btn.textContent = '사진 담는 중…';
+      try {
+        const list = await Promise.all(items.map(async (it) => new File(
+          [await (await fetch(it.url)).blob()], it.name, { type: 'image/jpeg' })));
+        allFiles = canShareFiles(list) ? list : null;
+      } catch {
+        btn.disabled = false;
+        renderSaveAll();
+        return;
+      }
+      btn.disabled = false;
+      if (!allFiles) { downloadAll(items); return; }
+      await share();
+    });
 
     // 빛 보정(촬영마다 저절로 만드는 것)을 기다리는 동안 보여 주는 작은 알림
     const LIGHT_TIPS = ['그곳의 빛에 맞춘 사진을 만드는 중이에요', '햇살 방향을 맞추는 중이에요',
@@ -415,21 +500,18 @@
     const SUBS = {
       send: ['사진을 AI에게 보내고 있어요', '사진을 안전하게 전달하는 중이에요'],
       draw: {
-        scene: ['AI가 이곳의 빛과 분위기를 살피고 있어요', '자연스러운 자세를 고민하는 중이에요',
-                '표정은 그대로 지키며 그리는 중이에요', '영산강 노을빛을 얼굴에 입히는 중이에요',
-                '바람과 햇살을 한 붓씩 더하는 중이에요', '공들여 그리는 중이에요. 조금만 기다려 주세요'],
-        watercolor: ['물감을 섞는 중이에요', '종이에 붓질을 더하는 중이에요', '부드러운 번짐을 만드는 중이에요',
-                     '얼굴은 알아보게 지키며 칠하는 중이에요', '수채화 한 장이 거의 마르고 있어요'],
-        webtoon: ['선을 따는 중이에요', '밝은 색을 칠하는 중이에요', '표정을 살려 그리는 중이에요',
-                  '웹툰 한 컷처럼 다듬는 중이에요', '말풍선 없이도 이야기가 보이게 그리는 중이에요'],
-        film: ['필름을 감는 중이에요', '90년대 색감을 입히는 중이에요', '따뜻한 빛번짐을 더하는 중이에요',
-               '필름 입자를 고르게 뿌리는 중이에요', '현상소에서 막 나온 사진처럼 다듬는 중이에요'],
+        toon: ['칸을 나누는 중이에요', '주인공 얼굴을 웹툰 선으로 따는 중이에요', '두근! 효과음을 그리는 중이에요',
+               '말풍선에 한마디를 쓰는 중이에요', '반짝이와 효과선을 더하는 중이에요', '한 편 거의 다 그렸어요'],
+        poster: ['주인공 캐스팅 완료! 촬영을 준비하는 중이에요', '영화 같은 조명을 세팅하는 중이에요',
+                 '하늘을 웅장하게 바꾸는 중이에요', '제목 글씨를 새기는 중이에요', '개봉일을 적는 중이에요',
+                 '포스터 인쇄 직전이에요'],
+        art: ['캔버스를 펼치는 중이에요', '물감을 섞는 중이에요', '거장의 붓질을 따라 그리는 중이에요',
+              '금빛 액자를 고르는 중이에요', '미술관 벽에 거는 중이에요', '작품 이름표를 다는 중이에요'],
       },
-      finish: ['얼굴과 사람 수를 확인하고 있어요', '원래 배경에 맞춰 다듬는 중이에요', '프레임에 담는 중이에요',
-               '거의 다 됐어요!'],
+      finish: ['얼굴과 사람 수를 확인하고 있어요', '완성본을 저장하는 중이에요', '거의 다 됐어요!'],
     };
     function subFor(stage, id, t) {
-      const list = stage === 'draw' ? (SUBS.draw[id] || SUBS.draw.scene) : (SUBS[stage] || ['']);
+      const list = stage === 'draw' ? (SUBS.draw[id] || SUBS.draw.toon) : (SUBS[stage] || ['']);
       return list[Math.floor(t / 3) % list.length];
     }
     let lastSub = '';
@@ -441,8 +523,10 @@
         const box = $('#gen');
         box.classList.remove('done', 'fail');
         $('#genImg').src = versions.base.photo;
+        $('.gen-stage').style.aspectRatio = '';
         $('#genTitle').textContent = `${this.name(id)} 만드는 중`;
         $('#genRetry').hidden = true;
+        $('#genSave').hidden = true;
         $('#genHide').textContent = '닫고 기다리기';
         box.hidden = false;
         $('#genMini').hidden = true;
@@ -494,27 +578,29 @@
         }
         if (this.state === 'run' || pct < 100) this.raf = requestAnimationFrame(() => this.tick());
       },
-      finish(id) {  // 다 됐다: 흐림을 걷어 새 사진을 보여 주고 닫는다
+      finish(id) {  // 다 됐다: 흐림을 걷어 새 그림을 통째로 보여 주고, 그 자리에서 바로 저장하게 한다
         this.state = 'done';
         const v = versions[id];
-        const show = () => { this.close(); setVersion(id); };
+        setVersion(id);  // 뒤 화면도 새 그림으로 (저장할 파일도 미리 받아 둔다)
         if ($('#gen').hidden) {  // 닫고 기다리던 중이면 바로 바꿔 보여 준다
           $('#genMiniText').textContent = `${this.name(id)} 완성!`;
           setTimeout(() => { $('#genMini').hidden = true; }, 2500);
-          setVersion(id);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
           return;
         }
         const img = $('#genImg');
         const reveal = () => {
+          if (img.naturalWidth) $('.gen-stage').style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
           $('#gen').classList.add('done');
           $('#genTitle').textContent = `${this.name(id)} 완성!`;
-          $('#genSub').textContent = '새 사진이 준비됐어요';
+          $('#genSub').textContent = '마음에 들면 바로 휴대폰에 저장하세요';
           $('#genTime').textContent = '';
-          setTimeout(show, 1600);
+          $('#genSave').hidden = false;
+          $('#genHide').textContent = '닫기';
         };
         img.onload = reveal;
-        img.onerror = show;
-        img.src = v.photo;
+        img.onerror = () => this.close();
+        img.src = v.final;
         this.tick();
       },
       fail(kind) {
@@ -542,6 +628,7 @@
         cancelAnimationFrame(this.raf);
         $('#gen').hidden = true;
         $('#genMini').hidden = true;
+        if (this.state === 'done') window.scrollTo({ top: 0, behavior: 'smooth' });  // 새 그림이 위에 보이게
         if (this.state !== 'run') this.id = null;
       },
     };
@@ -558,6 +645,13 @@
         $('#genMini').hidden = true;
         $('#gen').hidden = false;
       }
+    });
+    // 완성 창에서 바로 저장 (창을 먼저 닫아야 안드로이드의 '어디에 저장됐는지' 안내가 보인다)
+    $('#genSave').addEventListener('click', () => {
+      const id = gen.id;
+      if (!id || !versions[id]) return;
+      gen.close();
+      save(versions[id].final, fileName(id));
     });
     $('#genRetry').addEventListener('click', () => {
       const id = gen.id;
@@ -613,6 +707,7 @@
       Object.entries(seen).forEach(([id, st]) => {
         if (st.state === 'ready') {
           versions[id] = { final: st.final, photo: st.photo };
+          if (st.name) names[id] = st.name;
           delete fxState[id];
         } else if (st.state === 'pending') {
           fxState[id] = 'pending';
@@ -715,7 +810,7 @@
         const btn = $('#saveGallery');
         btn.disabled = true;
         try {
-          const folder = await saveToFolder([{ url: versions[cur].final, name: `yeongsangang_${sid.slice(0, 6)}_${cur}.jpg` }]);
+          const folder = await saveToFolder([{ url: versions[cur].final, name: fileName(cur) }]);
           folderDone($('#savedGuide'), folder, 1);
         } catch (e) {
           if (!(e && e.name === 'AbortError')) folderFail($('#savedGuide'), e);  // 고르기를 닫은 것은 그냥 둔다
@@ -724,8 +819,8 @@
         }
       });
     }
-    $('#saveBtn').addEventListener('click', () => save(versions[cur].final, 'yeongsangang_frame.jpg'));
-    $('#saveShotBtn').addEventListener('click', () => save(versions[cur].photo, 'yeongsangang_photo.jpg'));
+    $('#saveBtn').addEventListener('click', () => save(versions[cur].final, fileName(cur)));
+    $('#saveShotBtn').addEventListener('click', () => save(versions[cur].photo, fileName(cur, true)));
     if (ANDROID) tip.textContent = '저장을 누르면 휴대폰의 ‘다운로드’ 폴더에 담겨요 (갤러리 → 앨범 → 다운로드).';
     else if (!navigator.canShare) tip.textContent = '저장이 안 되면 사진을 길게 눌러 ‘사진 앱에 저장’을 고르세요.';
     setVersion('base');

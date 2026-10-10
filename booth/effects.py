@@ -1,8 +1,9 @@
-"""AI 효과 버튼(선택 기능): GPT 이미지 편집으로 'AI 장면 연출'·그림체를 바꾼 사진을 만든다.
+"""AI 효과 버튼(선택 기능): GPT 이미지 편집으로 내가 주인공인 웹툰·영화 포스터·명화를 만든다.
 
 방문객이 QR로 연 휴대폰 화면에서 버튼을 누를 때만 만든다(비용은 누른 만큼만, 부스 줄은 안 밀린다).
-빛 보정(booth/ai.py)과 달리 그림 자체가 바뀌므로 결과를 그대로 쓴다. 표정은 살리도록 지시하지만
-얼굴이 조금 달라질 수 있어 원본은 항상 함께 둔다. 네 컷은 컷마다 따로 만들어 한 장으로 모은다.
+빛 보정(booth/ai.py)과 달리 그림 자체가 바뀌므로 결과를 그대로 쓴다. 얼굴은 살리도록 지시하지만
+조금 달라질 수 있어 원본은 항상 함께 둔다. 결과는 세로 한 장(1024x1536)이고 프레임 없이 그 자체가 완성본이다
+(말풍선·제목 글씨까지 GPT가 쓴다). 네 컷은 컷 네 장을 한 번에 보내 한 장으로 만든다(요청도 1장으로 센다).
 하루 상한(YS_GPT_DAILY)을 넘으면 더 만들지 않는다. GPU를 쓰지 않으므로 촬영 합성과 다투지 않는다.
 """
 import asyncio
@@ -19,7 +20,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from . import compose, config, frame, records, storage
+from . import compose, config, records, storage
 
 _lock = threading.Lock()
 _jobs = {}            # (sid, 효과 id) -> 'pending' | 'failed' | 'limit'
@@ -32,7 +33,7 @@ _tasks = set()        # 돌고 있는 작업 (가비지 컬렉션에 사라지�
 _tries = {}           # (sid, 효과 id) -> 만들어 본 횟수. 같은 사진·같은 효과는 실패해도 다시 한 번까지만
 MAX_TRIES = 2
 # 만드는 중인 작업의 진행 상황. 휴대폰 화면의 진행 애니메이션이 이걸 보고 움직인다
-# stage: send(보내는 중) -> draw(GPT가 그리는 중) -> finish(얼굴 확인·배경 맞추기·프레임)
+# stage: send(보내는 중) -> draw(GPT가 그리는 중) -> finish(얼굴 확인·저장)
 _progress = {}        # (sid, 효과 id) -> {'stage', 'drawn', 'done', 'total', 't0'}
 _avg = {}             # 효과 id -> 최근 걸린 시간(초). 예상 시간으로 보여 준다
 DEFAULT_ETA = 32.0    # 실측: 한 장 약 30초 + 마무리
@@ -83,15 +84,19 @@ def catalog():
 
 
 def _urls(sid, fx):
-    return {'final': f'/media/{sid}/fxf_{fx}.jpg', 'photo': f'/media/{sid}/fx_{fx}.jpg'}
+    """지금 효과는 세로 그림 한 장이 곧 완성본이라 둘이 같다 (예전 효과만 프레임 없는 사진이 따로 있다)."""
+    final = f'/media/{sid}/fxf_{fx}.jpg'
+    photo = f'/media/{sid}/fx_{fx}.jpg' if storage.path(sid, f'fx_{fx}').exists() else final
+    return {'final': final, 'photo': photo}
 
 
 def status(sid):
-    """효과마다 상태. 파일이 있으면 ready(서버를 다시 켜도 그대로), 아니면 만드는 중·실패·상한."""
+    """효과마다 상태. 파일이 있으면 ready(서버를 다시 켜도 그대로), 아니면 만드는 중·실패·상한.
+    예전 효과로 이미 만든 사진도 ready로 알려 준다 (휴대폰 화면에 이름과 함께 그대로 보이게)."""
     out = {}
     for fx in config.EFFECT_IDS:
         if storage.path(sid, f'fxf_{fx}').exists():
-            out[fx] = {'state': 'ready', **_urls(sid, fx)}
+            out[fx] = {'state': 'ready', 'name': config.EFFECT_NAMES[fx], **_urls(sid, fx)}
             continue
         with _lock:
             st = _jobs.get((sid, fx))
@@ -206,15 +211,14 @@ def request(sid, fx):
     sources = _sources(sid, rec)
     if not sources:
         return {'state': 'missing'}
-    if not _spend(len(sources)):
+    if not _spend(1):  # 네 컷도 한 번에 한 장으로 만든다
         with _lock:
             _jobs[(sid, fx)] = 'limit'
         print(f'[효과] 오늘 상한({config.GPT_DAILY}장)에 닿아 건너뜀 {sid} {fx}', flush=True)
         return {'state': 'limit'}
     with _lock:
         _jobs[(sid, fx)] = 'pending'
-        _progress[(sid, fx)] = {'stage': 'send', 'drawn': 0, 'done': 0, 'total': len(sources),
-                                't0': time.time()}
+        _progress[(sid, fx)] = {'stage': 'send', 'drawn': 0, 'done': 0, 'total': 1, 't0': time.time()}
     task = asyncio.get_running_loop().create_task(_make(sid, fx, rec, sources))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
@@ -230,49 +234,77 @@ def _sources(sid, rec):
     return paths if all(p.exists() for p in paths) else []
 
 
+def _line(msg, default):
+    """그림 속 글씨(말풍선·포스터 문구)로 넣을 한마디. 줄은 띄어 쓰고 따옴표·이모지는 빼며, 없거나 너무 길면 기본 문구."""
+    text = ''.join(c for c in (msg or '') if c not in '"“”\'‘’`' and ord(c) < 0x10000 and (c.isprintable() or c == '\n'))
+    text = ' '.join(text.split())
+    return text if 0 < len(text) <= config.FX_LINE_MAX else default
+
+
+def _prompt(effect, sid, rec, n, people=0):
+    """효과 프롬프트를 이 사진에 맞춰 채운다: 장소별 제목·화풍(네 컷은 첫 컷 장소), 한마디, 찍은 날짜, 사람 수."""
+    bgs = rec.get('bgs') or [rec.get('bg')]
+    place = config.FX_BY_BG.get(bgs[0], config.FX_DEFAULT)
+    _, style, hang = config.ART_STYLES.get(place['art'], config.ART_STYLES['monet'])
+    when = datetime.datetime.fromtimestamp(storage.taken_at(sid) or time.time(), config.LOCAL_TZ)
+    return (effect['many'] if n > 1 else effect['one']).format(
+        n=n, line=_line(rec.get('msg', ''), effect.get('line', '')), title=place['title'],
+        date=f'{when.month}월 {when.day}일', style=style,
+        display=config.ART_DISPLAY[hang].format(art_title=place['art_title']),
+        keep=config.FX_KEEP.format(photo='photos' if n > 1 else 'photo',
+                                   count=_count(people, n, effect.get('panels'))))
+
+
+def _count(people, n, panels):
+    """'사진 속 사람은 정확히 2명' 문장. 얼굴을 못 찾았으면(뒷모습 등) 넣지 않는다."""
+    if not people:
+        return ''
+    who = 'person' if people == 1 else 'people'
+    out = f'There {"is" if people == 1 else "are"} exactly {people} {who} in {"this photo" if n == 1 else "each photo"}. '
+    if panels:
+        return out + f'In every panel, draw only {"this person" if people == 1 else f"these {people} people"} and nobody else. '
+    return out + f'Draw exactly {people} {who}, each only once, and nobody else. '
+
+
 async def _make(sid, fx, rec, sources):
     global _sem
     if _sem is None:
         _sem = asyncio.Semaphore(config.GPT_PARALLEL)
     effect = config.EFFECT_BY_ID[fx]
-    bgs = rec.get('bgs') or [rec.get('bg')] * len(sources)
     t0 = time.time()
-
-    async def one(path, bg_id):
-        keep = effect.get('keep_background') and bg_id in config.BG_BY_ID
-        base = await asyncio.to_thread(count_faces, cv2.imread(str(path)))
+    try:
+        # 원본에서 가장 많이 보인 얼굴 수. 결과가 이보다 많으면 없던 사람을 그려 넣은 것이다
+        # ('가족사진'이라고 했더니 혼자 찍은 아이 옆에 어른 둘을 지어낸 일이 있었다).
+        # 웹툰은 같은 사람이 칸마다 나오므로 칸 수(한 장이면 3칸, 네 컷이면 4칸)만큼 늘려 준다
+        base = max(await asyncio.to_thread(lambda: [count_faces(cv2.imread(str(p))) for p in sources]))
+        limit = base * (max(3, len(sources)) if effect.get('panels') else 1)
+        prompt = _prompt(effect, sid, rec, len(sources), base)
+        img = None
         for attempt in range(2):
             if attempt and not _spend(1):  # 다시 그리는 것도 하루 상한 안에서만
                 break
             async with _sem:
                 _step(sid, fx, 'draw')
-                img = await asyncio.to_thread(_edit, path, effect['prompt'])
-            found = await asyncio.to_thread(count_faces, _bgr(img))
-            if base and found > base:
-                # '가족사진'이라고 했더니 혼자 찍은 아이 옆에 어른 둘을 지어내 넣은 일이 있었다
-                print(f'[효과] 얼굴이 {base}명에서 {found}명으로 늘어 버림 ({sid} {fx}, {attempt + 1}번째)',
-                      flush=True)
+                out = await asyncio.to_thread(_edit, sources, prompt)
+            found = await asyncio.to_thread(count_faces, _bgr(out))
+            if base and found > limit:
+                print(f'[효과] 얼굴이 {base}명에서 {found}명으로 늘어 버림 ({sid} {fx}, {attempt + 1}번째)', flush=True)
                 continue
-            _step(sid, fx, drawn=1)
-            if keep:
-                img = await asyncio.to_thread(_keep_background, img, bg_id)
-            _step(sid, fx, done=1)
-            return img
-        raise RuntimeError('GPT가 없던 사람을 그려 넣었다')
-
-    try:
-        imgs = await asyncio.gather(*[one(p, b) for p, b in zip(sources, bgs)])
-        _step(sid, fx, 'finish')
-        await asyncio.to_thread(_save, sid, fx, imgs, rec.get('msg', ''), rec.get('font'))
+            img = out
+            break
+        if img is None:
+            raise RuntimeError('GPT가 없던 사람을 그려 넣었다')
+        _step(sid, fx, drawn=1)
+        await asyncio.to_thread(_save, sid, fx, img)
         took = time.time() - t0
         with _lock:
             _jobs.pop((sid, fx), None)
             _progress.pop((sid, fx), None)
             _avg[fx] = took if fx not in _avg else _avg[fx] * 0.7 + took * 0.3
-        print(f'[효과] 완료 {sid} {fx} ({len(imgs)}장, {took:.1f}초)', flush=True)
+        print(f'[효과] 완료 {sid} {fx} ({len(sources)}컷 → 1장, {took:.1f}초)', flush=True)
     except Exception as e:  # 실패해도 방문객은 원본을 그대로 받는다
         if _key_bad:
-            _refund(len(sources))  # 키가 거절돼 그리지도 못했으니 오늘 장수에 넣지 않는다
+            _refund(1)  # 키가 거절돼 그리지도 못했으니 오늘 장수에 넣지 않는다
         with _lock:
             # 키가 거절됐으면 '다시 시도'를 보여 주지 않는다 (다시 눌러도 같다)
             _jobs[(sid, fx)] = 'off' if _key_bad else 'failed'
@@ -280,13 +312,11 @@ async def _make(sid, fx, rec, sources):
         print(f'[효과] 실패 {sid} {fx}: {e}', flush=True)
 
 
-def _save(sid, fx, imgs, message, font=None):
-    if len(imgs) == 1:
-        imgs[0].save(storage.path(sid, f'fx_{fx}'), quality=93, subsampling=0)
-        frame.render(imgs[0], message, storage.path(sid, f'fxf_{fx}'), font, storage.taken_at(sid))
-    else:
-        frame.save_grid(imgs, storage.path(sid, f'fx_{fx}'))
-        frame.render(imgs, message, storage.path(sid, f'fxf_{fx}'), font, storage.taken_at(sid))
+def _save(sid, fx, img):
+    """세로 그림 한 장이 완성본이다 (프레임에 넣지 않는다. 제목·말풍선까지 그림 안에 있다)."""
+    tmp = storage.path(sid, f'fxf_{fx}').with_suffix('.part')
+    img.save(tmp, 'JPEG', quality=93, subsampling=0)
+    tmp.replace(storage.path(sid, f'fxf_{fx}'))  # 다 쓴 뒤에 이름을 바꿔, 반쯤 쓴 파일이 '완성'으로 보이지 않게
 
 
 _faces = None
@@ -310,6 +340,11 @@ def _bgr(img):
 def count_faces(bgr, threshold=0.7):
     """사진 속 얼굴 수. GPT 결과가 원본보다 많으면 없던 사람을 그려 넣은 것이다."""
     sess = _face_session()
+    h, w = bgr.shape[:2]
+    if h * 4 != w * 3:  # 세로 그림은 4:3으로 검은 여백을 붙여 넣는다 (그냥 줄이면 얼굴이 납작해져 못 찾는다)
+        H, W = max(h, w * 3 // 4), max(w, h * 4 // 3)
+        bgr = cv2.copyMakeBorder(bgr, (H - h) // 2, H - h - (H - h) // 2, (W - w) // 2, W - w - (W - w) // 2,
+                                 cv2.BORDER_CONSTANT)
     x = cv2.resize(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), (640, 480)).astype(np.float32)
     x = ((x - 127) / 128).transpose(2, 0, 1)[None]
     scores, boxes = sess.run(None, {sess.get_inputs()[0].name: x})
@@ -327,45 +362,30 @@ def count_faces(bgr, threshold=0.7):
     return n
 
 
-def _keep_background(img, bg_id):
-    """GPT가 새로 그린 사진에서 사람만 오려 원래 배경 위에 다시 얹는다.
-    말로 '배경은 그대로'라고 해도 GPT는 꽃밭을 데크로 바꾸는 식으로 배경을 조금씩 다시 그린다.
-    이렇게 하면 배경은 원본과 똑같고, 사람의 포즈·빛만 GPT가 정한 대로 남는다."""
-    W, H = config.SHOT_W, config.SHOT_H
-    photo = _bgr(img)
-    a = compose.matte(photo)
-    if float((a > 0.5).mean()) < 0.01:  # 사람을 못 찾으면 GPT 결과를 그대로 쓴다
-        return img
-    bg = compose.cover(compose.read_image(config.BG_DIR / f'bg_{bg_id}.png'), W, H).astype(np.float32) / 255
-    # 본 합성과 같이: 경계에 묻은 GPT 배경색·역광 테두리를 걷어 낸 뒤 원래 배경 빛으로 감싼다
-    F = compose.decontaminate(compose.estimate_foreground(photo.astype(np.float32) / 255, a), a)
-    F = compose.light_wrap(F, a, bg)
-    out = compose._finish(F, a, bg, compose.foreground_mask(bg_id, W, H))
-    return Image.fromarray(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
-
-
 def _multipart(fields, files):
+    """files: [(필드 이름, (파일 이름, 내용, 형식)), ...] (같은 필드 이름을 여러 번 쓸 수 있게 목록으로 받는다)."""
     b = uuid.uuid4().hex
     parts = []
     for k, v in fields.items():
         parts.append(f'--{b}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode())
-    for k, (name, data, ctype) in files.items():
+    for k, (name, data, ctype) in files:
         parts.append(f'--{b}\r\nContent-Disposition: form-data; name="{k}"; filename="{name}"\r\n'
                      f'Content-Type: {ctype}\r\n\r\n'.encode() + data + b'\r\n')
     parts.append(f'--{b}--\r\n'.encode())
     return b''.join(parts), f'multipart/form-data; boundary={b}'
 
 
-def _edit(path, prompt):
-    """OpenAI 이미지 편집(/v1/images/edits). 사진은 1024x768(4:3)로 줄여 보내고, 받은 그림은 사진 크기로 키운다."""
-    w, h = (int(x) for x in config.GPT_SIZE.split('x'))
-    src = cv2.imread(str(path))
-    src = cv2.resize(src, (w, h), interpolation=cv2.INTER_AREA)
-    jpg = cv2.imencode('.jpg', src, [cv2.IMWRITE_JPEG_QUALITY, 92])[1].tobytes()
+def _edit(paths, prompt):
+    """OpenAI 이미지 편집(/v1/images/edits). 사진(네 컷이면 네 장)은 1024x768(4:3)로 줄여 보내고,
+    세로 그림(GPT_SIZE) 한 장을 받는다. 여러 장은 image[]로 한꺼번에 보낸다."""
+    files = []
+    for n, path in enumerate(paths):
+        src = cv2.resize(cv2.imread(str(path)), (1024, 768), interpolation=cv2.INTER_AREA)
+        jpg = cv2.imencode('.jpg', src, [cv2.IMWRITE_JPEG_QUALITY, 92])[1].tobytes()
+        files.append(('image[]' if len(paths) > 1 else 'image', (f'photo{n + 1}.jpg', jpg, 'image/jpeg')))
     body, ctype = _multipart(
         {'model': config.GPT_MODEL, 'prompt': prompt, 'size': config.GPT_SIZE,
-         'quality': config.GPT_QUALITY, 'n': '1', 'output_format': 'jpeg'},
-        {'image': ('photo.jpg', jpg, 'image/jpeg')})
+         'quality': config.GPT_QUALITY, 'n': '1', 'output_format': 'jpeg'}, files)
     req = urllib.request.Request('https://api.openai.com/v1/images/edits', data=body, headers={
         'Authorization': f'Bearer {config.OPENAI_KEY}', 'Content-Type': ctype})
     for attempt in range(3):
@@ -393,5 +413,4 @@ def _edit(path, prompt):
     print(f'[효과] 토큰 입력 {u.get("input_tokens")} · 출력 {u.get("output_tokens")} → ${cost:.4f}', flush=True)
     data = base64.b64decode(res['data'][0]['b64_json'])
     img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-    img = cv2.resize(img, (config.SHOT_W, config.SHOT_H), interpolation=cv2.INTER_CUBIC)
     return Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
