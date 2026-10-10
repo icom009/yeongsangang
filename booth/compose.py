@@ -325,7 +325,7 @@ def beautify(F, a, strength=1.0, glow_amount=0.16, warm=0.0):
 
 
 def _smoothstep(e0, e1, x):
-    t = np.clip((x - e0) / (e1 - e0), 0, 1)
+    t = np.clip((x - e0) / max(e1 - e0, 1e-6), 0, 1)  # 두 경계가 같으면 0으로 나눠 NaN이 생긴다
     return t * t * (3 - 2 * t)
 
 
@@ -416,6 +416,9 @@ def match_texture(F, a, bg):
     ep = float(np.mean(np.abs(fd[body])))
     eb = float(np.mean(np.abs(bd)))
     noise = float(np.median(np.abs(fd[body]))) * 1.4826  # 평평한 곳이 대부분이라 중앙값이 잡음 수준
+    # 어두운 곳의 검은 옷처럼 몸 절반 이상이 새까맣게 뭉개지면 중앙값이 0이 된다. 그러면 0으로 나눠 숫자가 깨지고(NaN)
+    # 기본 사진·AI 빛 보정 사진의 배경이 통째로 까맣게 나왔다 (2026-10-07~09 실제로 7건). 8비트 한 칸을 바닥으로 둔다
+    noise = max(noise, 1 / 255)
     k = float(np.clip(eb / (ep + 1e-5) - 1, 0, 1.2)) * 0.7
     if k <= 0.02:
         return F
@@ -469,6 +472,10 @@ def _sun_in_shot(bg_id, look, w, h):
 def _finish(F, a, bgf, fg=None):
     a3 = a[..., None]
     out = vignette(occlude(F * a3 + bgf * (1 - a3), a, bgf, fg))
+    bad = ~np.isfinite(out)
+    if bad.any():  # 안전장치: 계산값이 깨진 픽셀(NaN)은 검게 나오므로 배경으로 메우고 로그에 남긴다
+        print(f'[합성] 깨진 픽셀 {int(bad.any(2).sum())}개를 배경으로 메움', flush=True)
+        out = np.where(bad, bgf, out)
     return np.uint8(np.clip(out * 255 + 0.5, 0, 255))
 
 
