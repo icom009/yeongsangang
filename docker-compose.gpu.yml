@@ -20,3 +20,21 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+
+  # 밤마다(기본 05:00) 부스·IC-Light를 다시 띄워 오래 켜 둔 프로세스의 메모리를 비운다 (scripts/nightly-restart.sh).
+  # 도커 소켓을 쓰므로 이 컴퓨터 안에서만 돈다 (포트 없음)
+  restarter:
+    image: docker:cli
+    profiles: ["web"]
+    restart: unless-stopped
+    command: sh /restart.sh
+    environment:
+      YS_RESTART_AT: ${YS_RESTART_AT:-05:00}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./scripts/nightly-restart.sh:/restart.sh:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "2"
