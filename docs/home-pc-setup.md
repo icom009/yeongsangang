@@ -32,7 +32,7 @@ docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi  # GPU
 
 ```bash
 sudo apt update && sudo apt install -y git
-cd ~ && git clone -b upgrade/v2 https://github.com/icom009/yeongsangang.git
+cd ~ && git clone https://github.com/icom009/yeongsangang.git
 cd yeongsangang
 
 cp .env.local.example .env.local

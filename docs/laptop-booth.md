@@ -49,7 +49,7 @@
    - 알림: 방해 금지 켜기 (부스 화면 위에 알림이 뜨지 않게)
 3. **비상 모드 준비** (집 서버만 쓸 거라면 건너뛰어도 되지만, 해 두기를 권합니다)
    - [Docker Desktop](https://www.docker.com/products/docker-desktop/)을 설치합니다 (WSL2 사용).
-   - 저장소 받기: `git clone -b upgrade/v2 https://github.com/icom009/yeongsangang.git`
+   - 저장소 받기: `git clone https://github.com/icom009/yeongsangang.git`
    - `copy .env.laptop.example .env.laptop` 후 **관리 비밀번호**(`YS_MANAGE_KEY`)를 채웁니다. GPT 효과를 쓰려면 `YS_OPENAI_KEY`도 채웁니다.
    - `scripts\laptop\start-fallback.bat`을 한 번 실행해 **서버 이미지를 만들어 둡니다**. 처음엔 몇 분 걸리고 인터넷이 필요합니다. 확인했으면 `stop-fallback.bat`으로 끕니다.
    - 노트북에서 빌드하기 어렵다면 집 PC에서 만든 이미지를 옮깁니다:
