@@ -2,6 +2,66 @@
 
 2026 나주영산강축제 체험 부스용 웹앱입니다. 영산강 배경을 고르면 카메라 화면에서 바로 합성된 모습을 보고, 찍은 사진에 한마디를 남겨 QR코드로 휴대폰에 받아 갑니다.
 
+2026-10-04 ~ 10-11 축제 기간에 실제로 운영했습니다.
+- **부스:** Windows 노트북의 크롬 키오스크 화면입니다.
+- **서버:** 합성과 AI는 집 컴퓨터(RTX 3080 Ti)가 맡았습니다.
+- **받기:** 방문객은 QR로 `ysg26.cloud`의 받기 화면을 열었습니다.
+- **기록:** 완성 사진은 기록에 남은 것만 547장입니다.
+- **종료:** 축제가 끝난 10-11에 서버와 도메인을 닫았습니다.
+
+## 화면
+
+아래 화면은 축제가 끝난 뒤 같은 코드를 인터넷과 떨어진 시험용 컨테이너로 다시 띄워 찍었습니다.
+- **인물:** 방문객이 아니라 [Pexels 무료 사진](https://www.pexels.com/photo/1239291/)을 크롬의 가짜 카메라에 넣은 것입니다. 방문객 사진은 저장소에 넣지 않습니다.
+- **AI 효과:** 찍을 때 OpenAI를 다시 부르지 않았습니다. 개발 중에 같은 사진으로 실제로 만든 포스터를 보여 준 것입니다.
+
+### 부스 (한 컷)
+
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/screens/booth-1-intro.jpg" alt="1. 첫 화면"><br><b>1. 첫 화면</b><br>축제 대기 화면. 리모컨이나 키 하나로 시작합니다.</td>
+<td width="50%" valign="top"><img src="docs/screens/booth-2-places.jpg" alt="2. 장소 고르기"><br><b>2. 장소 고르기</b><br>영산강 장소 8곳 중 하나를 고릅니다. 오른쪽 위에서 한 컷과 네 컷을 바꿉니다.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screens/booth-3-live.jpg" alt="3. 실시간 합성 미리보기"><br><b>3. 실시간 합성 미리보기</b><br>웹캠 영상에서 사람만 떼어 고른 장소 위에 바로 보여 줍니다 (브라우저 MediaPipe).</td>
+<td width="50%" valign="top"><img src="docs/screens/booth-4-countdown.jpg" alt="4. 카운트다운"><br><b>4. 카운트다운</b><br>타이머는 3·5·10초 중에서 고릅니다.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screens/booth-5-review.jpg" alt="5. 서버 합성 결과"><br><b>5. 서버 합성 결과</b><br>서버가 GPU 매팅(RVM + BiRefNet)으로 다시 합성합니다. 장소 빛에 맞춘 필터 사진과 원본 중에서 고릅니다.</td>
+<td width="50%" valign="top"><img src="docs/screens/booth-6-write.jpg" alt="6. 한마디 남기기"><br><b>6. 한마디 남기기</b><br>프레임에 들어갈 한마디를 쓰고 손글씨체 9가지 중에서 고릅니다. 미리보기가 그대로 인쇄본이 됩니다.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screens/booth-7-qr.jpg" alt="7. 완성과 QR"><br><b>7. 완성과 QR</b><br>휴대폰 카메라로 QR을 찍어 사진을 받아 갑니다.</td>
+</tr>
+</table>
+
+### 부스 (네 컷)
+
+<table>
+<tr>
+<td width="33%" valign="top"><img src="docs/screens/four-1-guide.jpg" alt="네 컷 안내"><br><b>네 컷 안내</b><br>장소 네 곳을 고르고 (무작위 채우기도 됩니다), 한 장마다 '찍기'를 눌러 포즈를 바꿉니다.</td>
+<td width="33%" valign="top"><img src="docs/screens/four-2-review.jpg" alt="네 컷 결과"><br><b>네 컷 결과</b><br>네 장소에서 찍은 네 장이 2×2로 모입니다.</td>
+<td width="33%" valign="top"><img src="docs/screens/four-3-qr.jpg" alt="네 컷 완성과 QR"><br><b>네 컷 완성과 QR</b><br>같은 프레임에 네 컷이 들어갑니다.</td>
+</tr>
+</table>
+
+### 휴대폰 (QR로 여는 받기 화면)
+
+<table>
+<tr>
+<td width="25%" valign="top"><img src="docs/screens/phone-1-page.jpg" alt="받기 화면"><br><b>받기 화면</b><br>사진 저장과 'AI로 바꿔 보기' (웹툰·영화 포스터·명화)</td>
+<td width="25%" valign="top"><img src="docs/screens/phone-2-consent.jpg" alt="동의"><br><b>동의</b><br>사진이 OpenAI로 나가기 전에 한 번 묻습니다.</td>
+<td width="25%" valign="top"><img src="docs/screens/phone-3-making.jpg" alt="만드는 중"><br><b>만드는 중</b><br>진행률과 단계를 보여 줍니다 (실제로 약 30초).</td>
+<td width="25%" valign="top"><img src="docs/screens/phone-4-done.jpg" alt="완성"><br><b>완성</b><br>세로 포스터 한 장을 바로 휴대폰에 저장합니다.</td>
+</tr>
+</table>
+
+### 관리 화면 (`/manage`)
+
+날짜 탭으로 사진을 나눠 보고, QR과 링크를 다시 띄우거나 지웁니다. 단체로 온 손님은 여러 장을 골라 QR 하나로 묶어 줍니다. 위쪽 줄에 합성 대기, AI 상태, 오늘 GPT 사용 금액이 보입니다.
+
+<img src="docs/screens/manage.jpg" alt="관리 화면">
+
 ## 흐름
 
 1. **배경 고르고 찍기**: 웹캠 영상에서 사람만 분리해 고른 배경 위에 실시간으로 보여줍니다(브라우저의 MediaPipe). 타이머는 3, 5, 10초 중에서 고릅니다.
